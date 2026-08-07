@@ -8,17 +8,36 @@ function M.root()
   return dir
 end
 
+---Escapes one field so that no two distinct inputs can collide.
+---
+---Every character outside [A-Za-z0-9] becomes "-" plus two hex digits. That makes
+---the encoding reversible, which is what a plain gsub to "_" was not: it mapped
+---"/" and ":" onto the same byte, so two different thread ids produced one
+---filename and one draft silently overwrote the other.
+---@param field string
+---@return string encoded
+local function encode_field(field)
+  return (field:gsub("[^%w]", function(c)
+    return ("-%02X"):format(c:byte())
+  end))
+end
+
 ---Builds a filesystem-safe key identifying one draft.
 ---
----Every character outside [A-Za-z0-9_-] is replaced, so a repo slug or a
----GraphQL node id containing "/" or ":" cannot escape the drafts directory.
+---Each of the three fields is escaped independently by encode_field and joined
+---with "_", which cannot appear inside an encoded field (it encodes to "-5F").
+---That keeps a repo slug or GraphQL node id containing "/" or ":" from escaping
+---the drafts directory, and keeps two different inputs from colliding.
 ---@param repo string owner/name slug
 ---@param kind string comment kind, e.g. "IssueComment"
 ---@param thread_id string|nil thread or comment id, nil for a top-level comment
 ---@return string key
 function M.key(repo, kind, thread_id)
-  local raw = table.concat({ repo, kind, thread_id or "root" }, "-")
-  return (raw:gsub("[^%w_-]", "_"))
+  return table.concat({
+    encode_field(repo),
+    encode_field(kind),
+    encode_field(thread_id or "root"),
+  }, "_")
 end
 
 ---@param key string

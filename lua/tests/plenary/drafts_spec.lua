@@ -47,6 +47,35 @@ describe("octo.drafts:", function()
     eq(nil, key:find("/", 1, true))
   end)
 
+  it("gives different keys to thread ids differing only in a disallowed character", function()
+    local a = drafts.key("owner/repo", "IssueComment", "a/b")
+    local b = drafts.key("owner/repo", "IssueComment", "a:b")
+
+    assert.is_not.equal(a, b)
+  end)
+
+  it("cannot collide across field boundaries", function()
+    local a = drafts.key("owner", "repo-Issue", "root")
+    local b = drafts.key("owner-repo", "Issue", nil)
+
+    assert.is_not.equal(a, b)
+  end)
+
+  it("still round-trips a key built from ids containing separators", function()
+    local key = drafts.key("owner/repo", "PullRequestReviewComment", "PRRT_kwDOA:b=c")
+
+    drafts.save(key, "body")
+
+    eq("body", drafts.load(key))
+  end)
+
+  it("stores drafts under stdpath('state'), not anywhere else", function()
+    local root = drafts.root()
+
+    eq(1, root:find(tmp, 1, true))
+    assert.is_not.equal(nil, root:find("octo%-drafts"))
+  end)
+
   it("discards a draft", function()
     local key = drafts.key("owner/repo", "IssueComment", nil)
     drafts.save(key, "text")

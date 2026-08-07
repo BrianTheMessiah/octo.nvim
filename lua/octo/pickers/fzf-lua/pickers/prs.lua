@@ -71,6 +71,9 @@ function M.picker(opts)
     return
   end
 
+  local requested_repo = opts.repo
+  local requested_prompt_title = opts.prompt_title
+
   local repo = utils.pop_key(opts, "repo")
   if utils.is_blank(repo) then
     repo = utils.get_remote_name()
@@ -152,14 +155,23 @@ function M.picker(opts)
         local entry = formatted_pulls[selected[1]]
         checkout_pull_request(entry)
       end,
-      ["ctrl-o"] = function()
-        local next_opts = vim.tbl_extend("force", opts, { author = "@me", window_title = "My Pull Requests" })
+      [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_mine.lhs)] = function()
+        local next_opts = vim.tbl_extend("force", opts, {
+          repo = requested_repo,
+          prompt_title = requested_prompt_title,
+          author = "@me",
+          window_title = "My Pull Requests",
+        })
         vim.schedule(function()
           M.picker(next_opts)
         end)
       end,
-      ["ctrl-a"] = function()
-        local next_opts = vim.tbl_extend("force", opts, { window_title = "Pull Requests" })
+      [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_all.lhs)] = function()
+        local next_opts = vim.tbl_extend("force", opts, {
+          repo = requested_repo,
+          prompt_title = requested_prompt_title,
+          window_title = "Pull Requests",
+        })
         next_opts.author = nil
         vim.schedule(function()
           M.picker(next_opts)

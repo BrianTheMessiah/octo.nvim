@@ -135,21 +135,35 @@ describe("octo.ui.comment-popup:", function()
     eq("keep me", drafts.load "k7")
   end)
 
-  it("binds both submit keys buffer-locally so switchboard's global \\op cannot win", function()
+  it("binds both submit keys buffer-locally in both normal and insert mode", function()
     local _, bufnr = open {
       target = { kind = "IssueComment" },
       draft_key = "k11",
       on_submit = function() end,
     }
 
-    local lhs = {}
-    for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "n")) do
-      lhs[m.lhs] = true
+    ---@param mode string
+    ---@return table<string, boolean>
+    local function lhs_set(mode)
+      local lhs = {}
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, mode)) do
+        lhs[m.lhs] = true
+      end
+      return lhs
     end
 
+    local normal = lhs_set "n"
+    local insert = lhs_set "i"
+
     -- nvim reports <leader> resolved to its current value
-    eq(true, lhs["\\op"] ~= nil or lhs["<Leader>op"] ~= nil)
-    eq(true, lhs["<C-S>"] ~= nil or lhs["<C-s>"] ~= nil)
+    eq(true, normal["\\op"] ~= nil or normal["<Leader>op"] ~= nil)
+    eq(true, normal["<C-S>"] ~= nil or normal["<C-s>"] ~= nil)
+
+    -- Insert mode is the half that matters most: <C-s> is globally
+    -- vim.lsp.buf.signature_help() in insert mode, so losing this binding
+    -- means pressing it mid-compose pops LSP help instead of submitting.
+    eq(true, insert["\\op"] ~= nil or insert["<Leader>op"] ~= nil)
+    eq(true, insert["<C-S>"] ~= nil or insert["<C-s>"] ~= nil)
   end)
 
   it("refuses to submit an empty body", function()
@@ -191,5 +205,38 @@ describe("octo.ui.comment-popup:", function()
     comment_popup.cancel(bufnr)
 
     eq(nil, drafts.load "k10")
+  end)
+
+  it("persists the draft and forgets its state when the buffer is wiped out directly", function()
+    local winid, bufnr = open {
+      target = { kind = "IssueComment" },
+      draft_key = "k12",
+      on_submit = function() end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "abandoned via :bdelete" })
+
+    -- Neither submit nor cancel: the popup's buffer is torn down directly, the
+    -- way :bd!, :bwipeout!, or external code would, bypassing both.
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+
+    eq("abandoned via :bdelete", drafts.load "k12")
+    eq(false, vim.api.nvim_win_is_valid(winid))
+  end)
+
+  it("persists nothing when draft_key is nil, even with text present", function()
+    local _, bufnr = open {
+      target = { kind = "IssueComment" },
+      draft_key = nil,
+      on_submit = function() end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "never written to disk" })
+
+    comment_popup.cancel(bufnr)
+
+    local before = {}
+    for name in vim.fs.dir(drafts.root()) do
+      table.insert(before, name)
+    end
+    eq({}, before)
   end)
 end)

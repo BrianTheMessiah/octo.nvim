@@ -11,6 +11,9 @@ M.COMPOSE_MARK = "────────────────────�
 ---@type table<integer, table>
 local state = {}
 
+---Milliseconds of typing quiet before a draft is written to disk.
+local PERSIST_DELAY_MS = 300
+
 ---The first line of the compose region, 1-indexed.
 ---@param bufnr integer
 ---@return integer line
@@ -42,23 +45,69 @@ local function persist(bufnr)
   end
 end
 
+---Stops and releases a popup's debounce timer, if it has one.
+---@param entry table|nil
+---@return nil
+local function stop_timer(entry)
+  if not entry or not entry.timer then
+    return
+  end
+  entry.timer:stop()
+  if not entry.timer:is_closing() then
+    entry.timer:close()
+  end
+  entry.timer = nil
+end
+
+---Restarts a per-buffer timer that writes the draft once typing pauses.
+---
+---submit and cancel persist immediately instead of going through this timer,
+---so a debounced write can only ever coalesce keystrokes, never delay the
+---writes that matter for correctness.
+---@param bufnr integer
+---@return nil
+local function schedule_persist(bufnr)
+  local entry = state[bufnr]
+  if not entry then
+    return
+  end
+  if not entry.timer then
+    entry.timer = assert(vim.uv.new_timer())
+  end
+  entry.timer:stop()
+  entry.timer:start(
+    PERSIST_DELAY_MS,
+    0,
+    vim.schedule_wrap(function()
+      persist(bufnr)
+    end)
+  )
+end
+
 ---Closes the popup and forgets its state.
 ---@param bufnr integer
 ---@return nil
 local function teardown(bufnr)
   local entry = state[bufnr]
   state[bufnr] = nil
+  stop_timer(entry)
   if entry and entry.winid then
     window.try_close_wins(entry.winid)
   end
 end
 
 ---Sends the composed comment. Blank bodies are refused without calling back.
+---
+---A `submitting` flag on the entry blocks re-entry: without it, pressing a
+---submit key twice before an async on_submit resolves would fire it twice
+---and could create a duplicate comment upstream. The flag is cleared on
+---failure so a retry is possible, and is implicitly cleared on success
+---because teardown discards the whole entry.
 ---@param bufnr integer
 ---@return nil
 function M.submit(bufnr)
   local entry = state[bufnr]
-  if not entry then
+  if not entry or entry.submitting then
     return
   end
   local body = M.body(bufnr)
@@ -67,8 +116,10 @@ function M.submit(bufnr)
     return
   end
   persist(bufnr)
+  entry.submitting = true
   entry.on_submit(body, function(ok, err)
     if not ok then
+      entry.submitting = false
       utils.error(err or "Failed to submit comment")
       return
     end
@@ -154,9 +205,25 @@ function M.open(opts)
 
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
     buffer = bufnr,
-    desc = "Octo: keep the comment draft on disk",
+    desc = "Octo: keep the comment draft on disk, debounced",
     callback = function()
-      persist(bufnr)
+      schedule_persist(bufnr)
+    end,
+  })
+
+  -- Reached when the popup is closed by a route of its own -- :bd, :bwipeout!,
+  -- :q!, or external code -- rather than through submit or cancel. Persist
+  -- first, then forget: teardown would try to close a window that may already
+  -- be gone, and the debounce timer must not be left running against a dead
+  -- buffer.
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+    buffer = bufnr,
+    once = true,
+    desc = "Octo: keep the draft and forget the popup when its buffer goes away",
+    callback = function()
+      pcall(persist, bufnr)
+      stop_timer(state[bufnr])
+      state[bufnr] = nil
     end,
   })
 

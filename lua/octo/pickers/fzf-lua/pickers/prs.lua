@@ -10,6 +10,8 @@ local picker_utils = require "octo.pickers.fzf-lua.pickers.utils"
 local previewers = require "octo.pickers.fzf-lua.previewers"
 local utils = require "octo.utils"
 
+local M = {}
+
 local function checkout_pull_request(entry)
   utils.checkout_pr(entry.obj.number)
 end
@@ -18,7 +20,47 @@ local function not_implemented()
   utils.error "Not implemented yet"
 end
 
-return function(opts)
+---Builds the GraphQL query backing the PR picker.
+---
+---Without an author the repository connection is used, as before. With one the
+---search API is used instead: `repository.pullRequests` has no author argument
+---(see queries.lua) and GitHub does not offer one, so author filtering has to go
+---through search. Both paths feed entry_maker.gen_from_issue, so entries,
+---previewer and actions are identical either way.
+---@param opts table the picker's options; `author` and `states` are read here
+---@param owner string repository owner
+---@param name string repository name
+---@return string query the GraphQL document
+---@return table fields the variables to send
+---@return string jq the path to the node list in the response
+function M.build_query(opts, owner, name)
+  local cfg = octo_config.values
+  if utils.is_blank(opts.author) then
+    return queries.pull_requests, {
+      owner = owner,
+      name = name,
+      base_ref_name = opts.BaseRefName,
+      head_ref_name = opts.HeadRefName,
+      labels = opts.labels,
+      states = opts.states,
+      order_by = cfg.pull_requests.order_by,
+    }, ".data.repository.pullRequests.nodes"
+  end
+
+  local author = opts.author == "@me" and vim.g.octo_viewer or opts.author
+  local parts = { ("repo:%s/%s"):format(owner, name), "is:pr" }
+  if opts.states and #opts.states == 1 then
+    table.insert(parts, "is:" .. string.lower(opts.states[1]))
+  end
+  table.insert(parts, "author:" .. author)
+
+  return queries.search, { prompt = table.concat(parts, " "), type = "ISSUE" }, ".data.search.nodes"
+end
+
+---Opens the fzf-lua PR picker.
+---@param opts? table `repo`, `window_title`, `prompt_title`, `author`, `states`,
+---  `BaseRefName`, `HeadRefName`, `labels`, `cb`
+function M.picker(opts)
   opts = opts or {}
   if not opts.states then
     opts.states = { "OPEN" }
@@ -47,18 +89,14 @@ return function(opts)
   local formatted_pulls = {} ---@type table<string, table> entry.ordinal -> entry
 
   local function get_contents(fzf_cb)
+    local query, fields, jq = M.build_query(opts, owner, name)
+    local is_repository_query = query == queries.pull_requests
+    local key = jq:sub(2) -- strip the leading "." to match utils.get_nested_prop's dotted path
+
     gh.api.graphql {
-      query = queries.pull_requests,
-      F = {
-        owner = owner,
-        name = name,
-        base_ref_name = opts.BaseRefName,
-        head_ref_name = opts.HeadRefName,
-        labels = opts.labels,
-        states = opts.states,
-        order_by = cfg.pull_requests.order_by,
-      },
-      paginate = true,
+      query = query,
+      F = fields,
+      paginate = is_repository_query,
       jq = ".",
       opts = {
         stream_cb = function(data, err)
@@ -66,8 +104,13 @@ return function(opts)
             utils.error(err)
             fzf_cb()
           elseif data then
-            local resp = utils.aggregate_pages(data, "data.repository.pullRequests.nodes")
-            local pull_requests = resp.data.repository.pullRequests.nodes
+            local pull_requests
+            if is_repository_query then
+              local resp = utils.aggregate_pages(data, key)
+              pull_requests = utils.get_nested_prop(resp, key)
+            else
+              pull_requests = utils.get_nested_prop(vim.json.decode(data), key)
+            end
 
             for _, pull in ipairs(pull_requests) do
               local entry = entry_maker.gen_from_issue(pull)
@@ -109,6 +152,27 @@ return function(opts)
         local entry = formatted_pulls[selected[1]]
         checkout_pull_request(entry)
       end,
+      ["ctrl-o"] = function()
+        local next_opts = vim.tbl_extend("force", opts, { author = "@me", window_title = "My Pull Requests" })
+        vim.schedule(function()
+          M.picker(next_opts)
+        end)
+      end,
+      ["ctrl-a"] = function()
+        local next_opts = vim.tbl_extend("force", opts, { window_title = "Pull Requests" })
+        next_opts.author = nil
+        vim.schedule(function()
+          M.picker(next_opts)
+        end)
+      end,
     }),
   })
 end
+
+setmetatable(M, {
+  __call = function(_, opts)
+    return M.picker(opts)
+  end,
+})
+
+return M

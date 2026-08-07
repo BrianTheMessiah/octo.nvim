@@ -1261,6 +1261,54 @@ function M.octo(object, action, ...)
   end
 end
 
+---Decides what kind of comment the cursor position implies, and gathers the
+---identifiers needed to create it.
+---
+---Pure with respect to windows and buffers: it reads buffer state and returns a
+---description, touching nothing. Both the inline renderer and the popup consume
+---the result, which is why the branching lives here rather than in either one.
+---@param buffer OctoBuffer the buffer the cursor is in
+---@param review table|nil the current review, as reviews.get_current_review() returns
+---@return table|nil target { kind, replyTo, replyToRest, reviewId, thread }, nil on error
+---@return string|nil err a message when target is nil
+function M.classify_comment_target(buffer, review)
+  local thread = buffer:get_thread_at_cursor()
+  local has_thread = not utils.is_blank(thread)
+  local is_review_thread = buffer:isReviewThread()
+
+  if has_thread and is_review_thread then
+    if review == nil or review.id == -1 then
+      return nil, "Please start or resume a review first"
+    end
+    return {
+      kind = "PullRequestReviewComment",
+      replyTo = thread.replyTo,
+      replyToRest = thread.replyToRest,
+      reviewId = review.id,
+      thread = thread,
+    },
+      nil
+  end
+
+  if has_thread and not is_review_thread then
+    return {
+      kind = "PullRequestComment",
+      replyTo = thread.replyTo,
+      replyToRest = thread.replyToRest,
+      thread = thread,
+    },
+      nil
+  end
+
+  if is_review_thread then
+    return nil, "Error adding a comment to a review thread"
+  end
+
+  return {
+    kind = buffer:isDiscussion() and "DiscussionComment" or "IssueComment",
+  }, nil
+end
+
 --- Adds a new comment to an issue/PR or a review thread
 function M.add_pr_issue_or_review_thread_comment(body)
   body = body or " "
@@ -1291,30 +1339,21 @@ function M.add_pr_issue_or_review_thread_comment(body)
     },
   }
 
-  local _thread = buffer:get_thread_at_cursor()
-  if not utils.is_blank(_thread) and buffer:isReviewThread() then
-    comment_kind = "PullRequestReviewComment"
+  local target, err = M.classify_comment_target(buffer, reviews.get_current_review())
+  if not target then
+    utils.error(err)
+    return
+  end
 
-    -- are we trying to add a review comment while in 'review browse' mode?
-    local current_review = reviews.get_current_review()
-    if current_review == nil or current_review.id == -1 then
-      utils.error "Please start or resume a review first"
-      return
-    end
-
-    comment.pullRequestReview = { id = current_review.id }
+  local comment_kind = target.kind
+  local _thread = target.thread
+  comment.replyTo = target.replyTo
+  comment.replyToRest = target.replyToRest
+  if target.reviewId then
+    comment.pullRequestReview = { id = target.reviewId }
     comment.state = "PENDING"
-    comment.replyTo = _thread.replyTo
-    comment.replyToRest = _thread.replyToRest
-  elseif not utils.is_blank(_thread) and not buffer:isReviewThread() then
-    comment_kind = "PullRequestComment"
+  elseif comment_kind == "PullRequestComment" then
     comment.state = ""
-    comment.replyTo = _thread.replyTo
-    comment.replyToRest = _thread.replyToRest
-  elseif utils.is_blank(_thread) and not buffer:isReviewThread() then
-    comment_kind = buffer:isDiscussion() and "DiscussionComment" or "IssueComment"
-  elseif utils.is_blank(_thread) and buffer:isReviewThread() then
-    utils.error "Error adding a comment to a review thread"
   end
 
   if comment_kind == "IssueComment" then

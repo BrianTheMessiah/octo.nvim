@@ -13,6 +13,7 @@ local window = require "octo.ui.window"
 local writers = require "octo.ui.writers"
 local utils = require "octo.utils"
 local config = require "octo.config"
+local drafts = require "octo.drafts"
 local vim = vim
 
 -- a global variable where command handlers can access the details of the last
@@ -1309,12 +1310,118 @@ function M.classify_comment_target(buffer, review)
   }, nil
 end
 
+---Maps a comment kind onto its `style_overrides` slot.
+---@type table<string, string>
+local STYLE_SLOT = {
+  IssueComment = "issue",
+  PullRequestComment = "pull_request",
+  PullRequestReviewComment = "review_thread",
+  DiscussionComment = "discussion",
+}
+
+---Whether this comment kind composes in a popup or inline.
+---@param kind string one of the four comment kinds
+---@return string style "popup" or "inline"
+function M.comment_style_for(kind)
+  -- `commands.lua:15` already binds this module as `config`, not `octo_config`.
+  local comments = config.values.comments or {}
+  local slot = STYLE_SLOT[kind]
+  local override = slot and (comments.style_overrides or {})[slot] or nil
+  return override or comments.style or "popup"
+end
+
+---Builds the draft key for a classified target, or nil when drafts are off.
+---
+---Returning nil is how `comments.drafts.enabled = false` is honoured: the popup
+---treats a nil key as "do not persist".
+---@param buffer OctoBuffer
+---@param target table as classify_comment_target returns
+---@return string|nil key
+local function draft_key_for(buffer, target)
+  local comments = config.values.comments or {}
+  if not (comments.drafts or {}).enabled then
+    return nil
+  end
+  return drafts.key(buffer.repo or "unknown", target.kind, target.replyTo)
+end
+
+---Opens the compose popup for a classified target and submits through the
+---buffer's existing do_add_* methods.
+---@param buffer OctoBuffer
+---@param target table as classify_comment_target returns
+---@param context string[]|nil quoted lines shown above the compose region
+---@return nil
+function M.compose_in_popup(buffer, target, context)
+  local comment_popup = require "octo.ui.comment-popup"
+  comment_popup.open {
+    target = target,
+    context = context,
+    draft_key = draft_key_for(buffer, target),
+    title = target.replyTo and "Reply" or "New comment",
+    on_submit = function(body, done)
+      local metadata = {
+        id = -1,
+        body = body,
+        kind = target.kind,
+        replyTo = target.replyTo,
+        replyToRest = target.replyToRest,
+        reviewId = target.reviewId,
+        savedBody = "",
+        dirty = true,
+      }
+      local ok, err = pcall(function()
+        if target.kind == "IssueComment" then
+          buffer:do_add_issue_comment(metadata)
+        elseif target.kind == "DiscussionComment" then
+          buffer:do_add_discussion_comment(metadata)
+        elseif target.kind == "PullRequestComment" then
+          buffer:do_add_pull_request_comment(metadata)
+        elseif target.kind == "PullRequestReviewComment" then
+          if not utils.is_blank(target.replyTo) then
+            buffer:do_add_thread_comment(metadata)
+          else
+            buffer:do_add_new_thread(metadata)
+          end
+        end
+      end)
+      if not ok then
+        done(false, tostring(err))
+        return
+      end
+      done(true)
+      -- The do_add_* success callbacks backfill the inline placeholder this path
+      -- never creates, so the posted comment is only rendered by a reload.
+      --
+      -- A reload that fails leaves the comment posted and the buffer stale. Say
+      -- so rather than retrying: a retry here risks a second identical comment.
+      local reloaded = pcall(M.reload, { verbose = false })
+      if not reloaded then
+        utils.error "Comment posted, but the buffer could not be refreshed. Run `:Octo pr reload`."
+      end
+    end,
+  }
+end
+
 --- Adds a new comment to an issue/PR or a review thread
 function M.add_pr_issue_or_review_thread_comment(body)
   body = body or " "
   local buffer = utils.get_current_buffer()
 
   if not buffer then
+    return
+  end
+
+  local target, classify_err = M.classify_comment_target(buffer, reviews.get_current_review())
+  if not target then
+    utils.error(classify_err)
+    return
+  end
+  if M.comment_style_for(target.kind) == "popup" then
+    local context = nil
+    if body and body ~= " " then
+      context = vim.split(vim.trim(body), "\n")
+    end
+    M.compose_in_popup(buffer, target, context)
     return
   end
 
@@ -1338,12 +1445,6 @@ function M.add_pr_issue_or_review_thread_comment(body)
       { content = "EYES", users = { totalCount = 0 } },
     },
   }
-
-  local target, err = M.classify_comment_target(buffer, reviews.get_current_review())
-  if not target then
-    utils.error(err)
-    return
-  end
 
   local comment_kind = target.kind
   local _thread = target.thread

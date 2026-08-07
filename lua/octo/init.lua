@@ -45,6 +45,15 @@ function M.setup(user_config)
   autocmds.setup()
   commands.setup()
   gh.setup()
+
+  local comments = require("octo.config").values.comments or {}
+  local draft_cfg = comments.drafts or {}
+  if draft_cfg.enabled then
+    -- Deferred so a slow filesystem cannot delay startup.
+    vim.schedule(function()
+      pcall(require("octo.drafts").sweep, draft_cfg.sweep_after_days or 30)
+    end)
+  end
 end
 
 function M.update_layout_for_current_file()

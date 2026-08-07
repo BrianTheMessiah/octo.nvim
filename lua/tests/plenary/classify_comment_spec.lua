@@ -59,6 +59,8 @@ describe("commands.classify_comment_target:", function()
     eq(nil, err)
     eq("PullRequestReviewComment", result.kind)
     eq("review-9", result.reviewId)
+    eq("node-1", result.replyTo)
+    eq(42, result.replyToRest)
   end)
 
   it("refuses a review-thread comment when no review is in progress", function()
@@ -101,5 +103,43 @@ describe("commands.classify_comment_target:", function()
     local result = commands.classify_comment_target(buffer, nil)
 
     eq(7, result.thread.bufferEndLine)
+  end)
+end)
+
+describe("commands.comment_style_for:", function()
+  local config = require "octo.config"
+  local original
+
+  before_each(function()
+    original = config.values.comments
+    config.values.comments = {
+      style = "popup",
+      style_overrides = {},
+    }
+  end)
+
+  after_each(function()
+    config.values.comments = original
+  end)
+
+  it("falls back to the global style", function()
+    eq("popup", commands.comment_style_for "IssueComment")
+  end)
+
+  it("lets a surface override the global style", function()
+    config.values.comments.style_overrides.issue = "inline"
+
+    eq("inline", commands.comment_style_for "IssueComment")
+  end)
+
+  it("maps each comment kind to its own override slot", function()
+    config.values.comments.style_overrides.review_thread = "inline"
+
+    eq("inline", commands.comment_style_for "PullRequestReviewComment")
+    eq("popup", commands.comment_style_for "IssueComment")
+  end)
+
+  it("treats an unknown kind as the global style", function()
+    eq("popup", commands.comment_style_for "SomethingElse")
   end)
 end)

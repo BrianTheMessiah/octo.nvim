@@ -559,6 +559,20 @@ function M.get_default_values()
     debug = {
       notify_missing_timeline_items = false,
     },
+    comments = {
+      style = "popup",
+      style_overrides = {
+        issue = nil,
+        pull_request = nil,
+        review_thread = nil,
+        discussion = nil,
+      },
+      drafts = {
+        enabled = true,
+        sweep_after_days = 30,
+      },
+    },
+    submit_on_write = false,
   }
   -- END_CONFIG
 end

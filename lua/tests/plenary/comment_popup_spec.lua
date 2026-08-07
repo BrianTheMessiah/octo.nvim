@@ -223,6 +223,42 @@ describe("octo.ui.comment-popup:", function()
     eq(false, vim.api.nvim_win_is_valid(winid))
   end)
 
+  it("persists the draft and forgets its state when only the window is closed", function()
+    local winid, bufnr = open {
+      target = { kind = "IssueComment" },
+      draft_key = "k13",
+      on_submit = function() end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "abandoned via :q!" })
+
+    -- Neither submit nor cancel, and no :bd/:bwipeout: only the window closes,
+    -- the way :q! or an external nvim_win_close would.
+    vim.api.nvim_win_close(winid, true)
+
+    eq("abandoned via :q!", drafts.load "k13")
+    -- The buffer is bufhidden=wipe, so the window close wipes it out too; a
+    -- read against it now errors rather than returning stale content.
+    eq(false, vim.api.nvim_buf_is_valid(bufnr))
+  end)
+
+  it("calls on_submit exactly once when submit is invoked twice before it resolves", function()
+    local call_count = 0
+    local _, bufnr = open {
+      target = { kind = "IssueComment" },
+      draft_key = "k14",
+      on_submit = function(_, _)
+        call_count = call_count + 1
+        -- deliberately never calls done(): on_submit is still in flight
+      end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "submit me once" })
+
+    comment_popup.submit(bufnr)
+    comment_popup.submit(bufnr)
+
+    eq(1, call_count)
+  end)
+
   it("persists nothing when draft_key is nil, even with text present", function()
     local _, bufnr = open {
       target = { kind = "IssueComment" },

@@ -183,6 +183,15 @@ function M.open(opts)
   vim.bo[bufnr].filetype = "octo_comment"
   vim.bo[bufnr].modifiable = true
 
+  -- Closing the popup's window must also dispose of its buffer. create_centered_float
+  -- leaves bufhidden at nvim_create_buf's default of "hide", so a window-only close
+  -- (:q!, nvim_win_close) fires no BufDelete/BufWipeout and the state entry, its
+  -- on_submit closure and its debounce timer all leak. "wipe" makes the window close
+  -- fire BufWipeout, which the autocommand below already handles. Verified: the
+  -- buffer's lines are still readable inside that BufWipeout callback, so persisting
+  -- there does not race the wipe.
+  vim.bo[bufnr].bufhidden = "wipe"
+
   local map_opts = { buffer = bufnr, silent = true, noremap = true }
 
   -- Both submit keys are bound buffer-locally, and `<leader>op` must be among

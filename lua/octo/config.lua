@@ -666,6 +666,43 @@ function M.validate_config()
     validate_type(config.picker_config.use_emojis, "picker_config.use_emojis", "boolean")
     validate_type(config.picker_config.search_static, "picker_config.search_static", "boolean")
     if validate_type(config.picker_config.mappings, "picker_config.mappings", "table") then
+      ---Checks that no two picker mappings convert to the same fzf key.
+      ---
+      ---The fzf-lua pickers (e.g. `octo.pickers.fzf-lua.pickers.prs`) build one
+      ---Lua table constructor keyed by `utils.convert_vim_mapping_to_fzf(lhs)`.
+      ---Two mappings that convert to the same key collide silently and Lua
+      ---keeps only the last table entry, so this must run against the merged
+      ---runtime config (`config.picker_config.mappings`), not just the
+      ---defaults, since a user's own `setup()` can introduce the collision.
+      ---@param mappings OctoPickerMappings
+      local function validate_picker_mapping_distinctness(mappings)
+        local utils = require "octo.utils"
+        ---@type { [string]: string }
+        local seen_by_fzf_key = {}
+        ---@diagnostic disable-next-line: no-unknown
+        for action, map in pairs(mappings) do
+          if type(map) == "table" and type(map.lhs) == "string" then
+            local fzf_key = utils.convert_vim_mapping_to_fzf(map.lhs)
+            local other_action = seen_by_fzf_key[fzf_key]
+            if other_action then
+              err(
+                string.format("picker_config.mappings.%s", action),
+                string.format(
+                  "`picker_config.mappings.%s` (%q) collides with `picker_config.mappings.%s` on fzf key %q; "
+                    .. "rebind one of them so the picker can tell them apart",
+                  action,
+                  map.lhs,
+                  other_action,
+                  fzf_key
+                )
+              )
+            else
+              seen_by_fzf_key[fzf_key] = action
+            end
+          end
+        end
+      end
+
       ---@diagnostic disable-next-line: no-unknown
       for action, map in pairs(config.picker_config.mappings) do
         if validate_type(map, string.format("picker_config.mappings.%s", action), "table") then
@@ -673,6 +710,7 @@ function M.validate_config()
           validate_type(map.desc, string.format("picker_config.mappings.%s.desc", action), "string")
         end
       end
+      validate_picker_mapping_distinctness(config.picker_config.mappings)
     end
 
     -- Snacks specific validation

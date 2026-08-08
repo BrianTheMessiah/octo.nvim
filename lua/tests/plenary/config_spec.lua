@@ -143,5 +143,29 @@ describe("Config module:", function()
         assert.True(vim.tbl_count(errors) ~= 0)
       end)
     end)
+
+    describe("picker mapping distinctness", function()
+      it("accepts the default picker mappings", function()
+        eq({}, this.validate_config())
+      end)
+
+      it("rejects two mappings that convert to the same fzf key", function()
+        this.values.picker_config.mappings.checkout_pr.lhs = "<A-m>"
+        this.values.picker_config.mappings.filter_mine.lhs = "<A-m>"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
+
+      it("rejects mappings that collide only after fzf's case folding", function()
+        this.values.picker_config.mappings.checkout_pr.lhs = "<C-O>"
+        this.values.picker_config.mappings.merge_pr.lhs = "<C-o>"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
+    end)
   end)
 end)

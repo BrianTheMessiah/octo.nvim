@@ -121,6 +121,17 @@ local M = {}
 ---@class OctoConfigSearch
 ---@field completion_overrides table<string, string[]|fun(argLead: string, cmdLine: string): string[]>
 
+---@alias OctoCommentStyle "popup" | "inline"
+
+---@class OctoConfigDrafts
+---@field enabled boolean
+---@field sweep_after_days number
+
+---@class OctoConfigComments
+---@field style OctoCommentStyle
+---@field style_overrides {[string]: OctoCommentStyle}
+---@field drafts OctoConfigDrafts
+
 ---@class OctoConfig Octo configuration settings
 ---@field picker OctoPickers
 ---@field picker_config OctoPickerConfig
@@ -167,6 +178,8 @@ local M = {}
 ---@field poll OctoConfigPoll
 ---@field search OctoConfigSearch
 ---@field debug OctoConfigDebug
+---@field comments OctoConfigComments
+---@field submit_on_write boolean
 
 --- Returns the default octo config values
 ---@return OctoConfig
@@ -764,6 +777,25 @@ function M.validate_config()
     validate_type(config.debug.notify_missing_timeline_items, "debug.notify_missing_timeline_items", "boolean")
   end
 
+  local comment_styles = { "popup", "inline" }
+
+  local function validate_comments()
+    if not validate_type(config.comments, "comments", "table") then
+      return
+    end
+    validate_string_enum(config.comments.style, "comments.style", comment_styles)
+    if validate_type(config.comments.style_overrides, "comments.style_overrides", "table") then
+      ---@diagnostic disable-next-line: no-unknown
+      for kind, style in pairs(config.comments.style_overrides) do
+        validate_string_enum(style, string.format("comments.style_overrides.%s", kind), comment_styles)
+      end
+    end
+    if validate_type(config.comments.drafts, "comments.drafts", "table") then
+      validate_type(config.comments.drafts.enabled, "comments.drafts.enabled", "boolean")
+      validate_type(config.comments.drafts.sweep_after_days, "comments.drafts.sweep_after_days", "number")
+    end
+  end
+
   if validate_type(config, "base config", "table") then
     validate_type(config.use_local_fs, "use_local_fs", "boolean")
     validate_type(config.enable_builtin, "enable_builtin", "boolean")
@@ -837,6 +869,8 @@ function M.validate_config()
     validate_mappings()
     validate_poll()
     validate_debug()
+    validate_comments()
+    validate_type(config.submit_on_write, "submit_on_write", "boolean")
   end
 
   return errors

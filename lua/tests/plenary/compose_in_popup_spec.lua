@@ -6,7 +6,7 @@ local eq = assert.are.same
 ---Builds a stub OctoBuffer whose do_add_* methods are spies recording the
 ---comment_metadata they were called with, and optionally invoking the
 ---completion callback they were given the way a resolved `gh` call would.
----@param opts? { resolve: table<string, { ok: boolean, err: string? }>? }
+---@param opts? { number: integer?, resolve: table<string, { ok: boolean, err: string? }>? }
 ---@return table buffer
 ---@return table<string, table> calls kind -> the comment_metadata it received
 local function fake_buffer(opts)
@@ -15,6 +15,7 @@ local function fake_buffer(opts)
   local buffer = {
     commentsMetadata = {},
     repo = "owner/name",
+    number = opts.number,
   }
   for _, name in ipairs {
     "do_add_issue_comment",
@@ -163,6 +164,24 @@ describe("commands.compose_in_popup:", function()
     commands.compose_in_popup(buffer, { kind = "IssueComment" }, nil)
 
     eq(nil, recorded_opts.draft_key)
+  end)
+
+  it("gives two different issue/PR numbers in the same repo different draft keys (C2)", function()
+    config.values.comments = {
+      style = "popup",
+      style_overrides = {},
+      drafts = { enabled = true, sweep_after_days = 30 },
+    }
+
+    local buffer_a = fake_buffer { number = 100 }
+    commands.compose_in_popup(buffer_a, { kind = "IssueComment" }, nil)
+    local key_a = recorded_opts.draft_key
+
+    local buffer_b = fake_buffer { number = 42 }
+    commands.compose_in_popup(buffer_b, { kind = "IssueComment" }, nil)
+    local key_b = recorded_opts.draft_key
+
+    assert.is_not.equal(key_a, key_b)
   end)
 
   it("titles a fresh comment 'New comment' and a reply 'Reply'", function()

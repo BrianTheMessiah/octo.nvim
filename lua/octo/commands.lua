@@ -1336,7 +1336,11 @@ end
 ---Builds the draft key for a classified target, or nil when drafts are off.
 ---
 ---Returning nil is how `comments.drafts.enabled = false` is honoured: the popup
----treats a nil key as "do not persist".
+---treats a nil key as "do not persist". `buffer.number` is folded into the repo
+---field rather than passed as its own argument, because `drafts.key` only takes
+---three fields and the third is already `target.replyTo`: without the number,
+---every top-level draft (`replyTo == nil`) in a repo -- one per issue, one per
+---PR -- collapsed onto the same key.
 ---@param buffer OctoBuffer
 ---@param target table as classify_comment_target returns
 ---@return string|nil key
@@ -1345,7 +1349,8 @@ local function draft_key_for(buffer, target)
   if not (comments.drafts or {}).enabled then
     return nil
   end
-  return drafts.key(buffer.repo or "unknown", target.kind, target.replyTo)
+  local repo_and_number = string.format("%s#%s", buffer.repo or "unknown", tostring(buffer.number or "?"))
+  return drafts.key(repo_and_number, target.kind, target.replyTo)
 end
 
 ---Opens the compose popup for a classified target and submits through the

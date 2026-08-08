@@ -74,6 +74,78 @@ describe("octo.ui.comment-popup:", function()
     eq("my reply\nsecond line", comment_popup.body(bufnr))
   end)
 
+  it("reads back only the context region, above the separator", function()
+    local _, bufnr = open {
+      target = { kind = "IssueComment" },
+      context = { "> quoted one", "> quoted two" },
+      draft_key = "k16",
+      on_submit = function() end,
+    }
+
+    vim.api.nvim_buf_set_lines(bufnr, 3, -1, false, { "my reply" })
+
+    eq("> quoted one\n> quoted two", comment_popup.context_body(bufnr))
+  end)
+
+  it("reports the edited context region, not the context open was given", function()
+    local _, bufnr = open {
+      target = { kind = "IssueComment" },
+      context = { "> quoted one", "> quoted two" },
+      draft_key = "k17",
+      on_submit = function() end,
+    }
+
+    vim.api.nvim_buf_set_lines(bufnr, 0, 2, false, { "> trimmed to one line" })
+
+    eq("> trimmed to one line", comment_popup.context_body(bufnr))
+  end)
+
+  it("reports an empty context region once its lines are deleted, separator intact", function()
+    local _, bufnr = open {
+      target = { kind = "IssueComment" },
+      context = { "> quoted one", "> quoted two" },
+      draft_key = "k18",
+      on_submit = function() end,
+    }
+
+    vim.api.nvim_buf_set_lines(bufnr, 0, 2, false, {})
+
+    eq(comment_popup.COMPOSE_MARK, vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1])
+    eq("", comment_popup.context_body(bufnr))
+  end)
+
+  it("reports an empty context region when the popup opened without context", function()
+    -- No context means open writes no separator at all, so there is no region
+    -- above one. Returning "" rather than the whole buffer is what keeps a
+    -- fresh comment from publishing its own body back as a quote of itself.
+    local _, bufnr = open {
+      target = { kind = "IssueComment" },
+      draft_key = "k19",
+      on_submit = function() end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "a body and nothing else" })
+
+    eq("", comment_popup.context_body(bufnr))
+  end)
+
+  it("hands on_submit the popup's own buffer, so the context region can be re-read", function()
+    local seen_bufnr
+    local _, bufnr = open {
+      target = { kind = "IssueComment" },
+      context = { "> quoted one" },
+      draft_key = "k20",
+      on_submit = function(_, submitted_bufnr, done)
+        seen_bufnr = submitted_bufnr
+        done(true)
+      end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 2, -1, false, { "my reply" })
+
+    comment_popup.submit(bufnr)
+
+    eq(bufnr, seen_bufnr)
+  end)
+
   it("restores a saved draft into the compose region", function()
     drafts.save("k4", "unfinished thought")
 
@@ -91,7 +163,7 @@ describe("octo.ui.comment-popup:", function()
     local _, bufnr = open {
       target = { kind = "IssueComment" },
       draft_key = "k5",
-      on_submit = function(body, done)
+      on_submit = function(body, _, done)
         submitted = body
         done(true)
       end,
@@ -107,7 +179,7 @@ describe("octo.ui.comment-popup:", function()
     local winid, bufnr = open {
       target = { kind = "IssueComment" },
       draft_key = "k6",
-      on_submit = function(_, done)
+      on_submit = function(_, _, done)
         done(true)
       end,
     }
@@ -180,7 +252,7 @@ describe("octo.ui.comment-popup:", function()
     local winid, bufnr = open {
       target = { kind = "IssueComment" },
       draft_key = "k7",
-      on_submit = function(_, done)
+      on_submit = function(_, _, done)
         done(false, "network is down")
       end,
     }

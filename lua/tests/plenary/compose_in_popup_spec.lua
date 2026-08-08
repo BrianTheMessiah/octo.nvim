@@ -46,14 +46,47 @@ end
 
 describe("commands.compose_in_popup:", function()
   local comment_popup = require "octo.ui.comment-popup"
+
+  ---The text the stubbed popup leaves in its compose region, below the separator.
+  local COMPOSED_BODY = "a composed body"
+
   local original_open
   local original_reload
   local original_comments
   local original_error
   local recorded_opts
+  local popup_bufnrs
+  local edit_popup
   local submit_result
   local reload_calls
   local error_messages
+
+  ---Builds the buffer a real comment_popup.open would have left behind.
+  ---
+  ---Laid out exactly as M.open lays it out: the context lines, then the
+  ---COMPOSE_MARK separator when there is any context at all, then the composed
+  ---body. compose_in_popup re-reads the region above that separator at submit
+  ---time via comment_popup.context_body, so a stub that handed on_submit
+  ---anything but a genuine buffer containing a genuine separator would exercise
+  ---none of that -- and a stub that handed it a placeholder would only prove
+  ---context_body tolerates junk.
+  ---@param context string[]|nil the lines comment_popup.open was asked to show as context
+  ---@return integer bufnr a scratch buffer laid out like a freshly opened popup
+  local function popup_buffer(context)
+    local content = {}
+    for _, line in ipairs(context or {}) do
+      table.insert(content, line)
+    end
+    if #content > 0 then
+      table.insert(content, comment_popup.COMPOSE_MARK)
+    end
+    table.insert(content, COMPOSED_BODY)
+
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+    table.insert(popup_bufnrs, bufnr)
+    return bufnr
+  end
 
   before_each(function()
     original_open = comment_popup.open
@@ -61,15 +94,27 @@ describe("commands.compose_in_popup:", function()
     original_comments = config.values.comments
     original_error = utils.error
     recorded_opts = nil
+    popup_bufnrs = {}
+    edit_popup = nil
     submit_result = nil
     reload_calls = 0
     error_messages = {}
 
+    -- Stands in for the real popup without opening a floating window: builds
+    -- the same buffer, lets the test edit it the way a user would, then submits
+    -- the body read back out of it. The body is read through the real
+    -- comment_popup.body so that an edit above the separator cannot silently
+    -- leak into what is submitted as the comment.
     comment_popup.open = function(opts)
       recorded_opts = opts
-      opts.on_submit("a composed body", function(ok, err)
+      local bufnr = popup_buffer(opts.context)
+      if edit_popup then
+        edit_popup(bufnr)
+      end
+      opts.on_submit(comment_popup.body(bufnr), bufnr, function(ok, err)
         submit_result = { ok = ok, err = err }
       end)
+      return nil, bufnr
     end
     commands.reload = function()
       reload_calls = reload_calls + 1
@@ -84,6 +129,9 @@ describe("commands.compose_in_popup:", function()
     commands.reload = original_reload
     config.values.comments = original_comments
     utils.error = original_error
+    for _, bufnr in ipairs(popup_bufnrs or {}) do
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end
   end)
 
   it("dispatches an issue comment to do_add_issue_comment only", function()
@@ -246,6 +294,60 @@ describe("commands.compose_in_popup:", function()
     commands.compose_in_popup(buffer, { kind = "IssueComment" }, { "> quoted line 1", "> quoted line 2" })
 
     eq("> quoted line 1\n> quoted line 2\n\na composed body", calls.do_add_issue_comment.body)
+  end)
+
+  -- The three tests below are the ones the quote-at-open-time implementation
+  -- could not pass. It captured `context` when the popup opened and glued that
+  -- capture onto the body at submit, so whatever the user did to the quote in
+  -- between was discarded: trimming published the untrimmed original, and
+  -- deleting published the quote anyway. Each edits the context region of the
+  -- popup's real buffer before submit and asserts on the body that reaches the
+  -- do_add_* spy -- i.e. on what would actually be published.
+
+  it("publishes the trimmed quote, not the longer quote the popup opened with", function()
+    local buffer, calls = fake_buffer()
+    -- The user cuts a three-line quote down to the one line they are answering.
+    edit_popup = function(bufnr)
+      vim.api.nvim_buf_set_lines(bufnr, 0, 3, false, { "> the line actually being answered" })
+    end
+    commands.compose_in_popup(buffer, { kind = "IssueComment" }, {
+      "> quoted line 1",
+      "> quoted line 2",
+      "> quoted line 3",
+    })
+
+    eq("> the line actually being answered\n\na composed body", calls.do_add_issue_comment.body)
+  end)
+
+  it("publishes no quote at all when the user deletes the quote from the popup", function()
+    local buffer, calls = fake_buffer()
+    -- Deletes the quote lines and leaves the separator: deleting the separator
+    -- too is the case comment_popup.submit refuses outright, so it never gets
+    -- as far as a published body.
+    edit_popup = function(bufnr)
+      vim.api.nvim_buf_set_lines(bufnr, 0, 2, false, {})
+    end
+    commands.compose_in_popup(buffer, { kind = "IssueComment" }, { "> quoted line 1", "> quoted line 2" })
+
+    eq("a composed body", calls.do_add_issue_comment.body)
+  end)
+
+  it("publishes an untouched quote intact, byte for byte", function()
+    local buffer, calls = fake_buffer()
+    -- Re-reading the region rather than using the captured array must not
+    -- rewrite a quote nobody edited: blank lines inside it and trailing
+    -- punctuation both survive.
+    edit_popup = nil
+    commands.compose_in_popup(
+      buffer,
+      { kind = "IssueComment" },
+      { "> first paragraph of the quote", ">", "> second paragraph, with trailing space and a colon:" }
+    )
+
+    eq(
+      "> first paragraph of the quote\n>\n> second paragraph, with trailing space and a colon:\n\na composed body",
+      calls.do_add_issue_comment.body
+    )
   end)
 
   it("does not reattach the quote for kinds that already thread structurally", function()

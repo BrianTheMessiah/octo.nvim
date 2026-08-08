@@ -1383,20 +1383,24 @@ end
 ---GraphQL thread id (DiscussionComment) already thread structurally and do not
 ---need it repeated in the body.
 ---
----The quote is appended here, at submit time, rather than seeded into the
----popup's editable compose region: the popup still shows it as the read-only
----context above the separator (I1's contract), so what the user sees they are
----replying to cannot be edited or accidentally deleted along with real answer
----text. It is glued back on only once the body is otherwise final.
+---`quote_text` must come from `comment_popup.context_body(bufnr)`, read fresh
+---at submit time -- never from the `context` array `compose_in_popup` passed
+---to `comment_popup.open`. The context region is editable, not read-only
+---display (I1 fixed the read-only *bug*, not made it read-only *by design*:
+---trimming a long quote down to the relevant line is legitimate editing), so
+---the array captured at open time goes stale the instant the user changes
+---what is above the separator. Publishing that stale capture would either
+---resurrect text the user deliberately trimmed away, or -- if they deleted
+---the quote entirely -- publish a quote the user asked to not include.
 ---@param kind string a classify_comment_target kind
----@param context string[]|nil quoted lines shown as read-only context
+---@param quote_text string the popup's current context region, from comment_popup.context_body
 ---@param body string the composed, editable body
 ---@return string body with the quote reattached when the kind requires it
-local function body_with_quote(kind, context, body)
-  if kind ~= "IssueComment" or context == nil or #context == 0 then
+local function body_with_quote(kind, quote_text, body)
+  if kind ~= "IssueComment" or utils.is_blank(vim.trim(quote_text)) then
     return body
   end
-  return table.concat(context, "\n") .. "\n\n" .. body
+  return quote_text .. "\n\n" .. body
 end
 
 ---Opens the compose popup for a classified target and submits through the
@@ -1421,10 +1425,10 @@ function M.compose_in_popup(buffer, target, context)
     context = context,
     draft_key = draft_key_for(buffer, target),
     title = has_real_reply_to(target.replyTo) and "Reply" or "New comment",
-    on_submit = function(body, done)
+    on_submit = function(body, popup_bufnr, done)
       local metadata = {
         id = -1,
-        body = body_with_quote(target.kind, context, body),
+        body = body_with_quote(target.kind, comment_popup.context_body(popup_bufnr), body),
         kind = target.kind,
         replyTo = target.replyTo,
         replyToRest = target.replyToRest,

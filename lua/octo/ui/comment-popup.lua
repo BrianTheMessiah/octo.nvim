@@ -58,6 +58,26 @@ function M.body(bufnr)
   return table.concat(lines, "\n")
 end
 
+---The current text of the context region, above the separator.
+---
+---Read fresh at submit time, the same way M.body reads the compose region:
+---the context region is editable (I1), not read-only display, so a caller
+---that captured what M.open was given would publish what the user was
+---*shown*, not what they left after trimming, editing or deleting it. Callers
+---that fold this back into the published body (see body_with_quote in
+---commands.lua) must call this from inside on_submit, never from opts.context
+---captured at open time.
+---@param bufnr integer
+---@return string body the lines above the separator, joined by "\n"; "" when there is no separator
+function M.context_body(bufnr)
+  local separator = find_separator(bufnr)
+  if not separator then
+    return ""
+  end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, separator - 1, false)
+  return table.concat(lines, "\n")
+end
+
 ---Writes the current body to the draft store, or clears it when blank.
 ---
 ---A nil body (the separator was deleted; see M.body) is left untouched: the
@@ -162,7 +182,7 @@ function M.submit(bufnr)
   end
   persist(bufnr)
   entry.submitting = true
-  entry.on_submit(body, function(ok, err)
+  entry.on_submit(body, bufnr, function(ok, err)
     if not ok then
       entry.submitting = false
       utils.error(err or "Failed to submit comment")
@@ -188,7 +208,7 @@ end
 ---@field target table classification of what is being replied to, from classify_comment_target
 ---@field context? string[] read-only lines shown above the compose region
 ---@field draft_key? string key into the draft store; nil disables draft persistence
----@field on_submit fun(body: string, done: fun(ok: boolean, err: string|nil)) called on submit with the composed body
+---@field on_submit fun(body: string, bufnr: integer, done: fun(ok: boolean, err: string|nil)) called on submit with the composed body and the popup's own buffer, so a caller can re-derive the current context region via M.context_body
 ---@field title? string floating window header
 
 ---Opens a compose popup.

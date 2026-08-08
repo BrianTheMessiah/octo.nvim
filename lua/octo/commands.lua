@@ -1372,34 +1372,51 @@ function M.compose_in_popup(buffer, target, context)
         savedBody = "",
         dirty = true,
       }
+
+      ---Runs once the do_add_* mutation has actually resolved: only then is it
+      ---safe to tell the popup to discard the draft and tear itself down, and
+      ---only on success is it safe to reload. Before this, `done` fired the
+      ---instant the mutation was *dispatched*, so the popup declared success --
+      ---and reloaded, racing the still-in-flight mutation -- before GitHub had
+      ---answered.
+      ---@param ok boolean whether GitHub accepted the mutation
+      ---@param err string|nil the failure reason, when ok is false
+      local function after_dispatch(ok, err)
+        if not ok then
+          done(false, err)
+          return
+        end
+        done(true)
+        -- The do_add_* success callbacks backfill the inline placeholder this
+        -- path never creates, so the posted comment is only rendered by a
+        -- reload.
+        --
+        -- A reload that fails leaves the comment posted and the buffer stale.
+        -- Say so rather than retrying: a retry here risks a second identical
+        -- comment.
+        local reloaded = pcall(M.reload, { verbose = false })
+        if not reloaded then
+          utils.error "Comment posted, but the buffer could not be refreshed. Run `:Octo pr reload`."
+        end
+      end
+
       local ok, err = pcall(function()
         if target.kind == "IssueComment" then
-          buffer:do_add_issue_comment(metadata)
+          buffer:do_add_issue_comment(metadata, after_dispatch)
         elseif target.kind == "DiscussionComment" then
-          buffer:do_add_discussion_comment(metadata)
+          buffer:do_add_discussion_comment(metadata, after_dispatch)
         elseif target.kind == "PullRequestComment" then
-          buffer:do_add_pull_request_comment(metadata)
+          buffer:do_add_pull_request_comment(metadata, after_dispatch)
         elseif target.kind == "PullRequestReviewComment" then
           if not utils.is_blank(target.replyTo) then
-            buffer:do_add_thread_comment(metadata)
+            buffer:do_add_thread_comment(metadata, after_dispatch)
           else
-            buffer:do_add_new_thread(metadata)
+            buffer:do_add_new_thread(metadata, after_dispatch)
           end
         end
       end)
       if not ok then
         done(false, tostring(err))
-        return
-      end
-      done(true)
-      -- The do_add_* success callbacks backfill the inline placeholder this path
-      -- never creates, so the posted comment is only rendered by a reload.
-      --
-      -- A reload that fails leaves the comment posted and the buffer stale. Say
-      -- so rather than retrying: a retry here risks a second identical comment.
-      local reloaded = pcall(M.reload, { verbose = false })
-      if not reloaded then
-        utils.error "Comment posted, but the buffer could not be refreshed. Run `:Octo pr reload`."
       end
     end,
   }

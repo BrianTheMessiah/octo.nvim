@@ -4,10 +4,13 @@ local config = require "octo.config"
 local eq = assert.are.same
 
 ---Builds a stub OctoBuffer whose do_add_* methods are spies recording the
----comment_metadata they were called with.
+---comment_metadata they were called with, and optionally invoking the
+---completion callback they were given the way a resolved `gh` call would.
+---@param opts? { resolve: table<string, { ok: boolean, err: string? }>? }
 ---@return table buffer
 ---@return table<string, table> calls kind -> the comment_metadata it received
-local function fake_buffer()
+local function fake_buffer(opts)
+  opts = opts or {}
   local calls = {}
   local buffer = {
     commentsMetadata = {},
@@ -20,8 +23,12 @@ local function fake_buffer()
     "do_add_thread_comment",
     "do_add_new_thread",
   } do
-    buffer[name] = function(_, comment_metadata)
+    buffer[name] = function(_, comment_metadata, done)
       calls[name] = comment_metadata
+      local resolution = opts.resolve and opts.resolve[name]
+      if resolution and done then
+        done(resolution.ok, resolution.err)
+      end
     end
   end
   return buffer, calls
@@ -33,18 +40,26 @@ describe("commands.compose_in_popup:", function()
   local original_reload
   local original_comments
   local recorded_opts
+  local submit_result
+  local reload_calls
 
   before_each(function()
     original_open = comment_popup.open
     original_reload = commands.reload
     original_comments = config.values.comments
     recorded_opts = nil
+    submit_result = nil
+    reload_calls = 0
 
     comment_popup.open = function(opts)
       recorded_opts = opts
-      opts.on_submit("a composed body", function(_, _) end)
+      opts.on_submit("a composed body", function(ok, err)
+        submit_result = { ok = ok, err = err }
+      end)
     end
-    commands.reload = function() end
+    commands.reload = function()
+      reload_calls = reload_calls + 1
+    end
   end)
 
   after_each(function()
@@ -159,6 +174,28 @@ describe("commands.compose_in_popup:", function()
     commands.compose_in_popup(buffer, { kind = "PullRequestComment", replyTo = "node-1" }, nil)
     eq("Reply", recorded_opts.title)
   end)
+
+  it("tells the popup the comment posted only once do_add_* calls back with success (C1)", function()
+    local buffer = fake_buffer { resolve = { do_add_issue_comment = { ok = true } } }
+    commands.compose_in_popup(buffer, { kind = "IssueComment" }, nil)
+
+    eq({ ok = true, err = nil }, submit_result)
+  end)
+
+  it("reloads only after the mutation succeeds, not merely after it is dispatched (C1)", function()
+    local buffer = fake_buffer { resolve = { do_add_issue_comment = { ok = true } } }
+    commands.compose_in_popup(buffer, { kind = "IssueComment" }, nil)
+
+    eq(1, reload_calls)
+  end)
+
+  it("tells the popup the comment failed, keeping its draft, when do_add_* calls back with failure (C1)", function()
+    local buffer = fake_buffer { resolve = { do_add_issue_comment = { ok = false, err = "network error" } } }
+    commands.compose_in_popup(buffer, { kind = "IssueComment" }, nil)
+
+    eq({ ok = false, err = "network error" }, submit_result)
+    eq(0, reload_calls)
+  end)
 end)
 
 describe("OctoBuffer:do_add_thread_comment on the popup path:", function()
@@ -225,5 +262,27 @@ describe("OctoBuffer:do_add_thread_comment on the popup path:", function()
     end, debug.traceback)
 
     eq(true, ok, err)
+  end)
+
+  it("calls done(true) once GitHub confirms the reply, on the popup path (C1)", function()
+    stub_graphql_success()
+
+    local buffer = {
+      bufnr = 1,
+      commentsMetadata = {},
+      threadsMetadata = {},
+      render_signs = function() end,
+    }
+
+    local done_result
+    OctoBuffer.do_add_thread_comment(buffer, {
+      replyTo = "node-1",
+      body = "hello",
+      reviewId = "review-1",
+    }, function(ok, err)
+      done_result = { ok = ok, err = err }
+    end)
+
+    eq({ ok = true, err = nil }, done_result)
   end)
 end)

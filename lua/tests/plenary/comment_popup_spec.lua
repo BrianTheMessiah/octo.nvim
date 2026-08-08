@@ -119,6 +119,63 @@ describe("octo.ui.comment-popup:", function()
     eq(false, vim.api.nvim_win_is_valid(winid))
   end)
 
+  it("keeps the body correct after deleting a quoted context line above the separator", function()
+    local _, bufnr = open {
+      target = { kind = "PullRequestComment" },
+      context = { "quote line one", "quote line two" },
+      draft_key = "k15",
+      on_submit = function() end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 3, -1, false, { "my first line", "my second line" })
+    eq("my first line\nmy second line", comment_popup.body(bufnr))
+
+    -- Delete the first quoted context line the way a user editing in the
+    -- window would: it sits above the separator, and nothing marks it
+    -- read-only.
+    vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, {})
+
+    eq("my first line\nmy second line", comment_popup.body(bufnr))
+  end)
+
+  it("keeps the body correct after adding a line above the separator", function()
+    local _, bufnr = open {
+      target = { kind = "PullRequestComment" },
+      context = { "quote line one" },
+      draft_key = "k16",
+      on_submit = function() end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 2, -1, false, { "my first line", "my second line" })
+    eq("my first line\nmy second line", comment_popup.body(bufnr))
+
+    -- Insert a new line above the separator, the way a user extending their
+    -- quote in the window would.
+    vim.api.nvim_buf_set_lines(bufnr, 1, 1, false, { "quote line two" })
+
+    eq("my first line\nmy second line", comment_popup.body(bufnr))
+  end)
+
+  it("refuses to submit when the separator itself is deleted", function()
+    local called = false
+    local _, bufnr = open {
+      target = { kind = "PullRequestComment" },
+      context = { "quote line one" },
+      draft_key = "k17",
+      on_submit = function()
+        called = true
+      end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 2, -1, false, { "my first line", "my second line" })
+
+    -- Delete the separator line itself (line 2: "quote line one" is line 1).
+    vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, {})
+
+    eq(nil, comment_popup.body(bufnr))
+
+    comment_popup.submit(bufnr)
+
+    eq(false, called)
+  end)
+
   it("keeps the window open and the draft on disk when submit fails", function()
     local winid, bufnr = open {
       target = { kind = "IssueComment" },

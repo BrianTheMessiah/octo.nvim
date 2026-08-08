@@ -239,15 +239,29 @@ function M.open(opts)
 
   local map_opts = { buffer = bufnr, silent = true, noremap = true }
 
-  -- Both submit keys are bound buffer-locally, and `<leader>op` must be among
-  -- them even though switchboard installs a global `\op`: that global runs
-  -- `:Octo submit`, which would call save_buffer() on this scratch buffer rather
-  -- than sending the comment. A buffer-local mapping shadows it.
-  for _, lhs in ipairs { "<leader>op", "<C-s>" } do
-    vim.keymap.set({ "n", "i" }, lhs, function()
+  -- `<leader>op` must be bound buffer-locally even though switchboard installs
+  -- a global `\op`: that global runs `:Octo submit`, which would call
+  -- save_buffer() on this scratch buffer rather than sending the comment. A
+  -- buffer-local mapping shadows it. It is normal-mode only: `<leader>` is
+  -- `\`, and this buffer holds free-form prose, so `C:\opt\...`,
+  -- `\operatorname` or `\options` typed in insert mode would submit
+  -- mid-sentence (and stall for timeoutlen on every `\` besides).
+  --
+  -- `<C-s>` is bound in both modes: unlike `<leader>op` it is not a prose
+  -- character sequence, and dropping the insert-mode binding would fall
+  -- through to the global `<C-s>` map, `vim.lsp.buf.signature_help()`,
+  -- popping LSP help instead of submitting mid-compose.
+  vim.keymap.set(
+    "n",
+    "<leader>op",
+    function()
       M.submit(bufnr)
-    end, vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" }))
-  end
+    end,
+    vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" })
+  )
+  vim.keymap.set({ "n", "i" }, "<C-s>", function()
+    M.submit(bufnr)
+  end, vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" }))
 
   vim.keymap.set("n", "q", function()
     M.cancel(bufnr)

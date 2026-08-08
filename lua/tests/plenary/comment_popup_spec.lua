@@ -192,7 +192,7 @@ describe("octo.ui.comment-popup:", function()
     eq("keep me", drafts.load "k7")
   end)
 
-  it("binds both submit keys buffer-locally in both normal and insert mode", function()
+  it("binds <leader>op in normal mode only, and <C-s> in both normal and insert mode", function()
     local _, bufnr = open {
       target = { kind = "IssueComment" },
       draft_key = "k11",
@@ -216,10 +216,15 @@ describe("octo.ui.comment-popup:", function()
     eq(true, normal["\\op"] ~= nil or normal["<Leader>op"] ~= nil)
     eq(true, normal["<C-S>"] ~= nil or normal["<C-s>"] ~= nil)
 
-    -- Insert mode is the half that matters most: <C-s> is globally
+    -- <leader>op is "\" followed by prose characters that appear naturally
+    -- while composing free text (paths, "\operatorname", "\options"), so it
+    -- must not be reachable in insert mode: every "\" typed there would
+    -- otherwise stall for timeoutlen and risk submitting mid-sentence.
+    eq(false, insert["\\op"] ~= nil or insert["<Leader>op"] ~= nil)
+
+    -- Insert mode is the half that matters most for <C-s>: it is globally
     -- vim.lsp.buf.signature_help() in insert mode, so losing this binding
     -- means pressing it mid-compose pops LSP help instead of submitting.
-    eq(true, insert["\\op"] ~= nil or insert["<Leader>op"] ~= nil)
     eq(true, insert["<C-S>"] ~= nil or insert["<C-s>"] ~= nil)
   end)
 

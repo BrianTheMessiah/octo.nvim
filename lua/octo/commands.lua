@@ -1333,6 +1333,19 @@ function M.comment_style_for(kind)
   return override or comments.style or "popup"
 end
 
+---Whether a `replyTo` value names a real, already-existing comment.
+---
+---A brand-new review thread that has not been posted yet is represented by the
+---numeric sentinel `-1` (`ReviewThread.default_id`, `reviews/thread.lua`), which
+---`utils.is_blank` does not catch: `-1` is a non-nil, non-string, non-table
+---value, so it reads as truthy everywhere a plain `replyTo and ... or ...` or
+---`not utils.is_blank(replyTo)` check is used.
+---@param reply_to any target.replyTo, as classify_comment_target sets it
+---@return boolean
+local function has_real_reply_to(reply_to)
+  return not utils.is_blank(reply_to) and reply_to ~= -1
+end
+
 ---Builds the draft key for a classified target, or nil when drafts are off.
 ---
 ---Returning nil is how `comments.drafts.enabled = false` is honoured: the popup
@@ -1341,6 +1354,12 @@ end
 ---three fields and the third is already `target.replyTo`: without the number,
 ---every top-level draft (`replyTo == nil`) in a repo -- one per issue, one per
 ---PR -- collapsed onto the same key.
+---
+---`target.replyTo` is normalised through has_real_reply_to before being handed
+---to drafts.key: that field is meant to be a string id or nil, but the -1 stub
+---sentinel is a number, and drafts.key's field encoder calls `:gsub` on it
+---unconditionally. Passing -1 through unchanged is a guaranteed crash, not
+---just a wrong key.
 ---@param buffer OctoBuffer
 ---@param target table as classify_comment_target returns
 ---@return string|nil key
@@ -1350,7 +1369,34 @@ local function draft_key_for(buffer, target)
     return nil
   end
   local repo_and_number = string.format("%s#%s", buffer.repo or "unknown", tostring(buffer.number or "?"))
-  return drafts.key(repo_and_number, target.kind, target.replyTo)
+  local reply_to = has_real_reply_to(target.replyTo) and target.replyTo or nil
+  return drafts.key(repo_and_number, target.kind, reply_to)
+end
+
+---Reattaches quoted context to a composed body for kinds GitHub cannot thread
+---natively.
+---
+---Issue and PR-conversation comments (both classified as "IssueComment") have
+---no reply relationship on GitHub's side: the quote *is* the only link back to
+---what is being answered, so it must end up in the published body. Kinds with
+---a real `replyTo` (PullRequestComment, PullRequestReviewComment) or a real
+---GraphQL thread id (DiscussionComment) already thread structurally and do not
+---need it repeated in the body.
+---
+---The quote is appended here, at submit time, rather than seeded into the
+---popup's editable compose region: the popup still shows it as the read-only
+---context above the separator (I1's contract), so what the user sees they are
+---replying to cannot be edited or accidentally deleted along with real answer
+---text. It is glued back on only once the body is otherwise final.
+---@param kind string a classify_comment_target kind
+---@param context string[]|nil quoted lines shown as read-only context
+---@param body string the composed, editable body
+---@return string body with the quote reattached when the kind requires it
+local function body_with_quote(kind, context, body)
+  if kind ~= "IssueComment" or context == nil or #context == 0 then
+    return body
+  end
+  return table.concat(context, "\n") .. "\n\n" .. body
 end
 
 ---Opens the compose popup for a classified target and submits through the
@@ -1360,16 +1406,25 @@ end
 ---@param context string[]|nil quoted lines shown above the compose region
 ---@return nil
 function M.compose_in_popup(buffer, target, context)
+  if target.kind == "PullRequestReviewComment" and not has_real_reply_to(target.replyTo) then
+    -- do_add_new_thread needs .path, .diffSide, .snippetStartLine and
+    -- .snippetEndLine, none of which the popup collects: dispatching here
+    -- would send GitHub an input it can only reject. Refuse before opening the
+    -- popup at all, rather than composing and rejecting on submit.
+    utils.error "Cannot start a new review thread from the popup. Start it from the diff instead."
+    return
+  end
+
   local comment_popup = require "octo.ui.comment-popup"
   comment_popup.open {
     target = target,
     context = context,
     draft_key = draft_key_for(buffer, target),
-    title = target.replyTo and "Reply" or "New comment",
+    title = has_real_reply_to(target.replyTo) and "Reply" or "New comment",
     on_submit = function(body, done)
       local metadata = {
         id = -1,
-        body = body,
+        body = body_with_quote(target.kind, context, body),
         kind = target.kind,
         replyTo = target.replyTo,
         replyToRest = target.replyToRest,
@@ -1378,12 +1433,9 @@ function M.compose_in_popup(buffer, target, context)
         dirty = true,
       }
 
-      ---Runs once the do_add_* mutation has actually resolved: only then is it
-      ---safe to tell the popup to discard the draft and tear itself down, and
-      ---only on success is it safe to reload. Before this, `done` fired the
-      ---instant the mutation was *dispatched*, so the popup declared success --
-      ---and reloaded, racing the still-in-flight mutation -- before GitHub had
-      ---answered.
+      ---Runs once the do_add_* mutation has actually resolved (C1): only then
+      ---is it safe to tell the popup to discard the draft and tear itself down,
+      ---and only on success is it safe to reload.
       ---@param ok boolean whether GitHub accepted the mutation
       ---@param err string|nil the failure reason, when ok is false
       local function after_dispatch(ok, err)
@@ -1392,6 +1444,17 @@ function M.compose_in_popup(buffer, target, context)
           return
         end
         done(true)
+
+        -- A review-thread buffer's do_add_thread_comment already refreshes the
+        -- thread panel via review:update_threads. Its buffer name
+        -- (octo://.../review/<id>/threads/...) does not parse as one of
+        -- M.load's known kinds, so routing it through M.reload here would ask
+        -- gh.api.graphql for a query it was never given -- silently, since
+        -- that failure raises no Lua error for this pcall to catch (I2).
+        if buffer:isReviewThread() then
+          return
+        end
+
         -- The do_add_* success callbacks backfill the inline placeholder this
         -- path never creates, so the posted comment is only rendered by a
         -- reload.
@@ -1413,11 +1476,7 @@ function M.compose_in_popup(buffer, target, context)
         elseif target.kind == "PullRequestComment" then
           buffer:do_add_pull_request_comment(metadata, after_dispatch)
         elseif target.kind == "PullRequestReviewComment" then
-          if not utils.is_blank(target.replyTo) then
-            buffer:do_add_thread_comment(metadata, after_dispatch)
-          else
-            buffer:do_add_new_thread(metadata, after_dispatch)
-          end
+          buffer:do_add_thread_comment(metadata, after_dispatch)
         end
       end)
       if not ok then
@@ -1442,9 +1501,24 @@ function M.add_pr_issue_or_review_thread_comment(body)
     return
   end
   if M.comment_style_for(target.kind) == "popup" then
+    local is_reply = body and body ~= " "
     local context = nil
-    if body and body ~= " " then
+    if is_reply then
       context = vim.split(vim.trim(body), "\n")
+
+      -- classify_comment_target only inspects review threads (get_thread_at_cursor),
+      -- never a plain comment under the cursor, so a discussion reply never got a
+      -- replyTo here -- unlike the inline path just below, which computes its own
+      -- independently of what classify returned. Compute it the same way, but only
+      -- for a reply: doing this for a plain "add" would turn "Reply to comment?"
+      -- from a question the inline path still asks into a default nobody agreed to.
+      if target.kind == "DiscussionComment" and target.replyTo == nil then
+        local comment_under_cursor = buffer:get_comment_at_cursor()
+        if not utils.is_blank(comment_under_cursor) then
+          target.replyTo = not utils.is_blank(comment_under_cursor.replyTo) and comment_under_cursor.replyTo.id
+            or comment_under_cursor.id
+        end
+      end
     end
     M.compose_in_popup(buffer, target, context)
     return

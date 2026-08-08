@@ -1,12 +1,18 @@
 ---@diagnostic disable
 local commands = require "octo.commands"
 local config = require "octo.config"
+local utils = require "octo.utils"
 local eq = assert.are.same
 
 ---Builds a stub OctoBuffer whose do_add_* methods are spies recording the
 ---comment_metadata they were called with, and optionally invoking the
 ---completion callback they were given the way a resolved `gh` call would.
----@param opts? { number: integer?, resolve: table<string, { ok: boolean, err: string? }>? }
+---@param opts? {
+---  repo: string?,
+---  number: integer?,
+---  is_review_thread: boolean?,
+---  resolve: table<string, { ok: boolean, err: string? }>?,
+---}
 ---@return table buffer
 ---@return table<string, table> calls kind -> the comment_metadata it received
 local function fake_buffer(opts)
@@ -14,8 +20,11 @@ local function fake_buffer(opts)
   local calls = {}
   local buffer = {
     commentsMetadata = {},
-    repo = "owner/name",
+    repo = opts.repo or "owner/name",
     number = opts.number,
+    isReviewThread = function()
+      return opts.is_review_thread == true
+    end,
   }
   for _, name in ipairs {
     "do_add_issue_comment",
@@ -40,17 +49,21 @@ describe("commands.compose_in_popup:", function()
   local original_open
   local original_reload
   local original_comments
+  local original_error
   local recorded_opts
   local submit_result
   local reload_calls
+  local error_messages
 
   before_each(function()
     original_open = comment_popup.open
     original_reload = commands.reload
     original_comments = config.values.comments
+    original_error = utils.error
     recorded_opts = nil
     submit_result = nil
     reload_calls = 0
+    error_messages = {}
 
     comment_popup.open = function(opts)
       recorded_opts = opts
@@ -61,12 +74,16 @@ describe("commands.compose_in_popup:", function()
     commands.reload = function()
       reload_calls = reload_calls + 1
     end
+    utils.error = function(msg)
+      table.insert(error_messages, msg)
+    end
   end)
 
   after_each(function()
     comment_popup.open = original_open
     commands.reload = original_reload
     config.values.comments = original_comments
+    utils.error = original_error
   end)
 
   it("dispatches an issue comment to do_add_issue_comment only", function()
@@ -111,7 +128,7 @@ describe("commands.compose_in_popup:", function()
     eq(nil, calls.do_add_new_thread)
   end)
 
-  it("dispatches a new review thread (blank replyTo) to do_add_new_thread, not do_add_thread_comment", function()
+  it("refuses a new review thread (blank replyTo) instead of dispatching an input GitHub would reject", function()
     local buffer, calls = fake_buffer()
     commands.compose_in_popup(buffer, {
       kind = "PullRequestReviewComment",
@@ -119,8 +136,25 @@ describe("commands.compose_in_popup:", function()
       reviewId = "review-9",
     }, nil)
 
-    eq("a composed body", calls.do_add_new_thread.body)
+    -- do_add_new_thread needs .path/.diffSide/.snippetStartLine/.snippetEndLine,
+    -- none of which the popup builds (I4): refusing means never opening the
+    -- popup for this branch at all, not opening it and rejecting on submit.
+    eq(nil, recorded_opts)
+    eq(nil, calls.do_add_new_thread)
     eq(nil, calls.do_add_thread_comment)
+    eq(1, #error_messages)
+  end)
+
+  it("refuses a new review thread carrying the numeric -1 stub sentinel the same as a blank replyTo", function()
+    local buffer, calls = fake_buffer()
+    commands.compose_in_popup(buffer, {
+      kind = "PullRequestReviewComment",
+      replyTo = -1,
+      reviewId = "review-9",
+    }, nil)
+
+    eq(nil, recorded_opts)
+    eq(nil, calls.do_add_new_thread)
   end)
 
   it("passes the full comment_metadata shape to the do_add_* spy", function()
@@ -194,6 +228,44 @@ describe("commands.compose_in_popup:", function()
     eq("Reply", recorded_opts.title)
   end)
 
+  it("treats a -1 replyTo as 'New comment' rather than 'Reply' wherever it appears", function()
+    local buffer, _ = fake_buffer()
+
+    -- -1 (ReviewThread.default_id) only actually reaches a real target as
+    -- PullRequestReviewComment.replyTo, and that combination is refused before
+    -- the title is even set (see the refusal test above). Exercising the
+    -- title logic itself on another kind proves has_real_reply_to, not just
+    -- the refusal, treats the sentinel as blank.
+    commands.compose_in_popup(buffer, { kind = "PullRequestComment", replyTo = -1 }, nil)
+
+    eq("New comment", recorded_opts.title)
+  end)
+
+  it("reattaches the quote to the body for an IssueComment reply, so it publishes (I3)", function()
+    local buffer, calls = fake_buffer()
+    commands.compose_in_popup(buffer, { kind = "IssueComment" }, { "> quoted line 1", "> quoted line 2" })
+
+    eq("> quoted line 1\n> quoted line 2\n\na composed body", calls.do_add_issue_comment.body)
+  end)
+
+  it("does not reattach the quote for kinds that already thread structurally", function()
+    local buffer, calls = fake_buffer()
+    commands.compose_in_popup(
+      buffer,
+      { kind = "PullRequestComment", replyTo = "node-1", replyToRest = 42 },
+      { "> quoted line" }
+    )
+
+    eq("a composed body", calls.do_add_pull_request_comment.body)
+  end)
+
+  it("does not publish a quote when composing a fresh IssueComment with no context", function()
+    local buffer, calls = fake_buffer()
+    commands.compose_in_popup(buffer, { kind = "IssueComment" }, nil)
+
+    eq("a composed body", calls.do_add_issue_comment.body)
+  end)
+
   it("tells the popup the comment posted only once do_add_* calls back with success (C1)", function()
     local buffer = fake_buffer { resolve = { do_add_issue_comment = { ok = true } } }
     commands.compose_in_popup(buffer, { kind = "IssueComment" }, nil)
@@ -214,6 +286,35 @@ describe("commands.compose_in_popup:", function()
 
     eq({ ok = false, err = "network error" }, submit_result)
     eq(0, reload_calls)
+  end)
+
+  it("does not reload after a review-thread reply: the review layer already refreshed it (I2)", function()
+    local buffer = fake_buffer {
+      is_review_thread = true,
+      resolve = { do_add_thread_comment = { ok = true } },
+    }
+    commands.compose_in_popup(buffer, {
+      kind = "PullRequestReviewComment",
+      replyTo = "node-1",
+      reviewId = "review-9",
+    }, nil)
+
+    eq({ ok = true, err = nil }, submit_result)
+    eq(0, reload_calls)
+  end)
+
+  it("still reports success on a review-thread reply even though it skips the reload (I2)", function()
+    local buffer = fake_buffer {
+      is_review_thread = true,
+      resolve = { do_add_thread_comment = { ok = true } },
+    }
+    commands.compose_in_popup(buffer, {
+      kind = "PullRequestReviewComment",
+      replyTo = "node-1",
+      reviewId = "review-9",
+    }, nil)
+
+    eq(true, submit_result.ok)
   end)
 end)
 
@@ -283,7 +384,7 @@ describe("OctoBuffer:do_add_thread_comment on the popup path:", function()
     eq(true, ok, err)
   end)
 
-  it("calls done(true) once GitHub confirms the reply, on the popup path (C1)", function()
+  it("calls done(true) once GitHub confirms the reply, on the popup path", function()
     stub_graphql_success()
 
     local buffer = {

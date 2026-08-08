@@ -1,3 +1,4 @@
+---@diagnostic disable
 local this = require "octo.config"
 local eq = assert.are.same
 
@@ -79,6 +80,92 @@ describe("Config module:", function()
 
       assert.truthy(errors["file_panel.use_icons"])
       assert.truthy(errors["file_panel.get_icon"])
+    end)
+
+    describe("comments", function()
+      it("accepts the default comments config", function()
+        eq({}, this.validate_config())
+      end)
+
+      it("rejects a comments.style outside the popup/inline enum", function()
+        this.values.comments.style = "Popup"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
+
+      it("rejects a style_overrides entry outside the popup/inline enum", function()
+        this.values.comments.style_overrides.issue = "Popup"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
+
+      it("accepts a valid style_overrides entry", function()
+        this.values.comments.style_overrides.issue = "inline"
+
+        eq({}, this.validate_config())
+      end)
+
+      it("rejects a non-boolean comments.drafts.enabled", function()
+        this.values.comments.drafts.enabled = "true"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
+
+      it("rejects a non-number comments.drafts.sweep_after_days", function()
+        this.values.comments.drafts.sweep_after_days = "30"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
+    end)
+
+    describe("submit_on_write", function()
+      it("accepts a boolean submit_on_write", function()
+        this.values.submit_on_write = true
+        eq({}, this.validate_config())
+
+        this.values.submit_on_write = false
+        eq({}, this.validate_config())
+      end)
+
+      it("rejects a truthy string submit_on_write, the exact footgun this guards against", function()
+        this.values.submit_on_write = "false"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
+    end)
+
+    describe("picker mapping distinctness", function()
+      it("accepts the default picker mappings", function()
+        eq({}, this.validate_config())
+      end)
+
+      it("rejects two mappings that convert to the same fzf key", function()
+        this.values.picker_config.mappings.checkout_pr.lhs = "<A-m>"
+        this.values.picker_config.mappings.filter_mine.lhs = "<A-m>"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
+
+      it("rejects mappings that collide only after fzf's case folding", function()
+        this.values.picker_config.mappings.checkout_pr.lhs = "<C-O>"
+        this.values.picker_config.mappings.merge_pr.lhs = "<C-o>"
+
+        local errors = this.validate_config()
+
+        assert.True(vim.tbl_count(errors) ~= 0)
+      end)
     end)
   end)
 end)

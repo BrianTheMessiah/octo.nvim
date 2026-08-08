@@ -533,37 +533,45 @@ function OctoBuffer:do_add_thread_comment(comment_metadata)
 
             self:render_signs()
 
-            -- update thread map
-            local thread_id ---@type string
-            for _, thread in ipairs(threads) do
-              for _, c in ipairs(thread.comments.nodes) do
-                if c.id == resp_comment.id then
-                  thread_id = thread.id
-                  break
+            -- The extmark repair below exists to stretch the thread's mark over
+            -- lines the inline path wrote into the buffer. The popup path writes
+            -- none, so it finds no placeholder and has nothing to repair -- and the
+            -- reload that follows a popup submit rebuilds these marks anyway.
+            -- Without this guard, comment_end is nil and the arithmetic below throws
+            -- *after* the thread's old extmark has already been deleted.
+            if comment_end then
+              -- update thread map
+              local thread_id ---@type string
+              for _, thread in ipairs(threads) do
+                for _, c in ipairs(thread.comments.nodes) do
+                  if c.id == resp_comment.id then
+                    thread_id = thread.id
+                    break
+                  end
                 end
               end
-            end
-            local mark_id ---@type integer
-            for markId, threadMetadata in pairs(self.threadsMetadata) do
-              if threadMetadata.threadId == thread_id then
-                mark_id = markId
+              local mark_id ---@type integer
+              for markId, threadMetadata in pairs(self.threadsMetadata) do
+                if threadMetadata.threadId == thread_id then
+                  mark_id = markId
+                end
               end
+              local extmark = vim.api.nvim_buf_get_extmark_by_id(
+                self.bufnr,
+                constants.OCTO_THREAD_NS,
+                tonumber(mark_id) --[[@as integer]],
+                { details = true }
+              )
+              local thread_start = extmark[1]
+              -- update extmark
+              vim.api.nvim_buf_del_extmark(self.bufnr, constants.OCTO_THREAD_NS, tonumber(mark_id) --[[@as integer]])
+              local thread_mark_id = vim.api.nvim_buf_set_extmark(self.bufnr, constants.OCTO_THREAD_NS, thread_start, 0, {
+                end_line = comment_end + 2,
+                end_col = 0,
+              })
+              self.threadsMetadata[tostring(thread_mark_id)] = self.threadsMetadata[tostring(mark_id)]
+              self.threadsMetadata[tostring(mark_id)] = nil
             end
-            local extmark = vim.api.nvim_buf_get_extmark_by_id(
-              self.bufnr,
-              constants.OCTO_THREAD_NS,
-              tonumber(mark_id) --[[@as integer]],
-              { details = true }
-            )
-            local thread_start = extmark[1]
-            -- update extmark
-            vim.api.nvim_buf_del_extmark(self.bufnr, constants.OCTO_THREAD_NS, tonumber(mark_id) --[[@as integer]])
-            local thread_mark_id = vim.api.nvim_buf_set_extmark(self.bufnr, constants.OCTO_THREAD_NS, thread_start, 0, {
-              end_line = comment_end + 2,
-              end_col = 0,
-            })
-            self.threadsMetadata[tostring(thread_mark_id)] = self.threadsMetadata[tostring(mark_id)]
-            self.threadsMetadata[tostring(mark_id)] = nil
           end
         end,
       },

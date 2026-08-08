@@ -9,6 +9,20 @@ local M = {}
 create("octo_autocmds", { clear = true })
 create("octobuffer_autocmds", { clear = false })
 
+---Handles `:w` in an octo:// buffer.
+---
+---Publishing is gated on `submit_on_write`. When it is off the buffer is left
+---modified on purpose: clearing the flag would make `:w` look like it saved,
+---which is the confusion this option exists to remove.
+---@return nil
+function M.on_buf_write_cmd()
+  if not config.values.submit_on_write then
+    require("octo.utils").info "Writing does not publish. Use `:Octo submit` (\\op) to send changes."
+    return
+  end
+  require("octo").save_buffer()
+end
+
 function M.setup()
   define({ "BufEnter" }, {
     group = "octo_autocmds",
@@ -53,7 +67,7 @@ function M.setup()
     group = "octo_autocmds",
     pattern = { "octo://*" },
     callback = function()
-      require("octo").save_buffer()
+      M.on_buf_write_cmd()
     end,
   })
   define({ "CursorHold" }, {

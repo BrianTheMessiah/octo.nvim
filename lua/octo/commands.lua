@@ -152,6 +152,9 @@ function M.setup()
     search = function(...)
       M.search(...)
     end,
+    submit = function()
+      M.submit()
+    end,
     limits = function()
       require("octo.ratelimit").show_rate_limits()
     end,
@@ -3062,6 +3065,13 @@ function M.actions()
   end
 
   picker.actions(flattened_actions)
+end
+
+---Publishes every pending change in the current octo buffer: title, body,
+---new comments and edits to existing ones.
+---@return nil
+function M.submit()
+  require("octo").save_buffer()
 end
 
 function M.search(...)

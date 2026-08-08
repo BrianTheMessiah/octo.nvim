@@ -1,0 +1,69 @@
+---@diagnostic disable
+local eq = assert.are.same
+
+-- fzf-lua is a plugin, not part of this repo, so it is only on the
+-- runtimepath when the test harness explicitly provides it (see
+-- lua/tests/minimal_init.vim). If it is ever missing again, fail loudly
+-- here instead of letting the whole file's require blow up silently.
+local ok, prs = pcall(require, "octo.pickers.fzf-lua.pickers.prs")
+
+describe("pr picker author filter:", function()
+  if not ok then
+    it("requires octo.pickers.fzf-lua.pickers.prs", function()
+      assert(
+        false,
+        "octo.pickers.fzf-lua.pickers.prs failed to load (is fzf-lua on the runtimepath?): " .. tostring(prs)
+      )
+    end)
+    return
+  end
+
+  local original_viewer
+
+  before_each(function()
+    original_viewer = vim.g.octo_viewer
+    vim.g.octo_viewer = "BrianTheMessiah"
+  end)
+
+  after_each(function()
+    vim.g.octo_viewer = original_viewer
+  end)
+
+  it("uses the repository query when no author is given", function()
+    local _, fields, jq = prs.build_query({ states = { "OPEN" } }, "fii-org", "api-gateway")
+
+    eq("fii-org", fields.owner)
+    eq(".data.repository.pullRequests.nodes", jq)
+  end)
+
+  it("switches to the search query when an author is given", function()
+    local _, fields, jq = prs.build_query({ states = { "OPEN" }, author = "someone" }, "fii-org", "api-gateway")
+
+    eq(".data.search.nodes", jq)
+    eq("repo:fii-org/api-gateway is:pr is:open author:someone", fields.prompt)
+  end)
+
+  it("resolves @me to the logged-in viewer", function()
+    local _, fields = prs.build_query({ states = { "OPEN" }, author = "@me" }, "fii-org", "api-gateway")
+
+    eq("repo:fii-org/api-gateway is:pr is:open author:BrianTheMessiah", fields.prompt)
+  end)
+
+  it("asks the search API for pull requests, not issues", function()
+    local _, fields = prs.build_query({ states = { "OPEN" }, author = "@me" }, "fii-org", "api-gateway")
+
+    eq("ISSUE", fields.type)
+  end)
+
+  it("reflects a closed-state request in the search prompt", function()
+    local _, fields = prs.build_query({ states = { "CLOSED" }, author = "me" }, "o", "n")
+
+    eq("repo:o/n is:pr is:closed author:me", fields.prompt)
+  end)
+
+  it("omits the state qualifier when several states are requested", function()
+    local _, fields = prs.build_query({ states = { "OPEN", "CLOSED" }, author = "me" }, "o", "n")
+
+    eq("repo:o/n is:pr author:me", fields.prompt)
+  end)
+end)

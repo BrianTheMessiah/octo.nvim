@@ -422,7 +422,9 @@ function OctoBuffer:do_save_title_and_body()
 end
 
 ---@param comment_metadata CommentMetadata
-function OctoBuffer:do_add_discussion_comment(comment_metadata)
+---@param done? fun(ok: boolean, err: string|nil): nil called once GitHub has answered;
+---  nil on the inline path, which behaves exactly as before
+function OctoBuffer:do_add_discussion_comment(comment_metadata, done)
   local f = {
     discussion_id = self:discussion().id,
     body = comment_metadata.body,
@@ -436,24 +438,31 @@ function OctoBuffer:do_add_discussion_comment(comment_metadata)
     jq = ".data.addDiscussionComment.comment",
     opts = {
       cb = gh.create_callback {
-        failure = utils.print_err,
+        failure = function(stderr)
+          utils.print_err(stderr)
+          if done then
+            done(false, stderr)
+          end
+        end,
         success = function(output)
           local resp = vim.json.decode(output)
 
-          if utils.trim(comment_metadata.body) ~= utils.trim(resp.body) then
-            return
-          end
-
-          for i, comment in ipairs(self.commentsMetadata) do
-            if comment.id == -1 then
-              self.commentsMetadata[i].id = resp.id
-              self.commentsMetadata[i].savedBody = resp.body
-              self.commentsMetadata[i].dirty = false
-              break
+          if utils.trim(comment_metadata.body) == utils.trim(resp.body) then
+            for i, comment in ipairs(self.commentsMetadata) do
+              if comment.id == -1 then
+                self.commentsMetadata[i].id = resp.id
+                self.commentsMetadata[i].savedBody = resp.body
+                self.commentsMetadata[i].dirty = false
+                break
+              end
             end
+
+            self:render_signs()
           end
 
-          self:render_signs()
+          if done then
+            done(true)
+          end
         end,
       },
     },
@@ -462,7 +471,9 @@ end
 
 ---Add a new comment to the issue/PR
 ---@param comment_metadata CommentMetadata
-function OctoBuffer:do_add_issue_comment(comment_metadata)
+---@param done? fun(ok: boolean, err: string|nil): nil called once GitHub has answered;
+---  nil on the inline path, which behaves exactly as before
+function OctoBuffer:do_add_issue_comment(comment_metadata, done)
   -- create new issue comment
   local obj = self:isIssue() and self:issue() or self:pullRequest()
   local id = obj.id
@@ -488,6 +499,15 @@ function OctoBuffer:do_add_issue_comment(comment_metadata)
             end
             self:render_signs()
           end
+          if done then
+            done(true)
+          end
+        end,
+        failure = function(stderr)
+          utils.error(stderr)
+          if done then
+            done(false, stderr)
+          end
         end,
       },
     },
@@ -496,7 +516,9 @@ end
 
 ---Replies to a review comment thread
 ---@param comment_metadata CommentMetadata
-function OctoBuffer:do_add_thread_comment(comment_metadata)
+---@param done? fun(ok: boolean, err: string|nil): nil called once GitHub has answered;
+---  nil on the inline path, which behaves exactly as before
+function OctoBuffer:do_add_thread_comment(comment_metadata, done)
   -- create new thread reply
   local query = graphql(
     "add_pull_request_review_comment_mutation",
@@ -508,6 +530,12 @@ function OctoBuffer:do_add_thread_comment(comment_metadata)
     f = { query = query },
     opts = {
       cb = gh.create_callback {
+        failure = function(stderr)
+          utils.error(stderr)
+          if done then
+            done(false, stderr)
+          end
+        end,
         success = function(output)
           ---@type octo.mutations.AddPullRequestReviewComment
           local resp = vim.json.decode(output)
@@ -533,37 +561,49 @@ function OctoBuffer:do_add_thread_comment(comment_metadata)
 
             self:render_signs()
 
-            -- update thread map
-            local thread_id ---@type string
-            for _, thread in ipairs(threads) do
-              for _, c in ipairs(thread.comments.nodes) do
-                if c.id == resp_comment.id then
-                  thread_id = thread.id
-                  break
+            -- The extmark repair below exists to stretch the thread's mark over
+            -- lines the inline path wrote into the buffer. The popup path writes
+            -- none, so it finds no placeholder and has nothing to repair -- and the
+            -- reload that follows a popup submit rebuilds these marks anyway.
+            -- Without this guard, comment_end is nil and the arithmetic below throws
+            -- *after* the thread's old extmark has already been deleted.
+            if comment_end then
+              -- update thread map
+              local thread_id ---@type string
+              for _, thread in ipairs(threads) do
+                for _, c in ipairs(thread.comments.nodes) do
+                  if c.id == resp_comment.id then
+                    thread_id = thread.id
+                    break
+                  end
                 end
               end
-            end
-            local mark_id ---@type integer
-            for markId, threadMetadata in pairs(self.threadsMetadata) do
-              if threadMetadata.threadId == thread_id then
-                mark_id = markId
+              local mark_id ---@type integer
+              for markId, threadMetadata in pairs(self.threadsMetadata) do
+                if threadMetadata.threadId == thread_id then
+                  mark_id = markId
+                end
               end
+              local extmark = vim.api.nvim_buf_get_extmark_by_id(
+                self.bufnr,
+                constants.OCTO_THREAD_NS,
+                tonumber(mark_id) --[[@as integer]],
+                { details = true }
+              )
+              local thread_start = extmark[1]
+              -- update extmark
+              vim.api.nvim_buf_del_extmark(self.bufnr, constants.OCTO_THREAD_NS, tonumber(mark_id) --[[@as integer]])
+              local thread_mark_id = vim.api.nvim_buf_set_extmark(self.bufnr, constants.OCTO_THREAD_NS, thread_start, 0, {
+                end_line = comment_end + 2,
+                end_col = 0,
+              })
+              self.threadsMetadata[tostring(thread_mark_id)] = self.threadsMetadata[tostring(mark_id)]
+              self.threadsMetadata[tostring(mark_id)] = nil
             end
-            local extmark = vim.api.nvim_buf_get_extmark_by_id(
-              self.bufnr,
-              constants.OCTO_THREAD_NS,
-              tonumber(mark_id) --[[@as integer]],
-              { details = true }
-            )
-            local thread_start = extmark[1]
-            -- update extmark
-            vim.api.nvim_buf_del_extmark(self.bufnr, constants.OCTO_THREAD_NS, tonumber(mark_id) --[[@as integer]])
-            local thread_mark_id = vim.api.nvim_buf_set_extmark(self.bufnr, constants.OCTO_THREAD_NS, thread_start, 0, {
-              end_line = comment_end + 2,
-              end_col = 0,
-            })
-            self.threadsMetadata[tostring(thread_mark_id)] = self.threadsMetadata[tostring(mark_id)]
-            self.threadsMetadata[tostring(mark_id)] = nil
+          end
+
+          if done then
+            done(true)
           end
         end,
       },
@@ -573,18 +613,26 @@ end
 
 ---Adds a new review comment thread to the current review.
 ---@param comment_metadata CommentMetadata
+---@param done? fun(ok: boolean, err: string|nil): nil called once GitHub has answered;
+---  nil on the inline path, which behaves exactly as before
 ---@return nil
-function OctoBuffer:do_add_new_thread(comment_metadata)
+function OctoBuffer:do_add_new_thread(comment_metadata, done)
   --TODO: How to create a new thread on a line where there is already one
 
   local review = require("octo.reviews").get_current_review()
   if not review then
+    if done then
+      done(false, "Please start or resume a review first")
+    end
     return
   end
   local layout = review.layout
   local file = layout:get_current_file()
   if not file then
     utils.error "No file selected"
+    if done then
+      done(false, "No file selected")
+    end
     return
   end
   local review_level = review:get_level()
@@ -614,13 +662,21 @@ function OctoBuffer:do_add_new_thread(comment_metadata)
       F = { input = input },
       opts = {
         cb = gh.create_callback {
-          failure = utils.print_err,
+          failure = function(stderr)
+            utils.print_err(stderr)
+            if done then
+              done(false, stderr)
+            end
+          end,
           success = function(output)
             ---@type octo.mutations.AddPullRequestReviewThread
             local resp = vim.json.decode(output).data.addPullRequestReviewThread
 
             if utils.is_blank(resp) then
               utils.error "Failed to create thread"
+              if done then
+                done(false, "Failed to create thread")
+              end
               return
             end
 
@@ -656,6 +712,10 @@ function OctoBuffer:do_add_new_thread(comment_metadata)
               end
               self:render_signs()
             end
+
+            if done then
+              done(true)
+            end
           end,
         },
       },
@@ -663,6 +723,9 @@ function OctoBuffer:do_add_new_thread(comment_metadata)
   elseif review_level == "COMMIT" then
     if isMultiline then
       utils.error "Can't create a multiline comment at the commit level"
+      if done then
+        done(false, "Can't create a multiline comment at the commit level")
+      end
       return
     else
       -- get the line number the comment is on
@@ -687,17 +750,26 @@ function OctoBuffer:do_add_new_thread(comment_metadata)
         local comment_ranges ---@type [integer, integer][]
         if not diffhunks then
           utils.error "Diff hunks not found"
+          if done then
+            done(false, "Diff hunks not found")
+          end
           return
         end
         if comment_metadata.diffSide == "RIGHT" then
           if not right_comment_ranges then
             utils.error "Right comment ranges not found"
+            if done then
+              done(false, "Right comment ranges not found")
+            end
             return
           end
           comment_ranges = right_comment_ranges
         elseif comment_metadata.diffSide == "LEFT" then
           if not left_comment_ranges then
             utils.error "Left comment ranges not found"
+            if done then
+              done(false, "Left comment ranges not found")
+            end
             return
           end
           comment_ranges = left_comment_ranges
@@ -740,6 +812,12 @@ function OctoBuffer:do_add_new_thread(comment_metadata)
         f = { query = query },
         opts = {
           cb = gh.create_callback {
+            failure = function(stderr)
+              utils.error(stderr)
+              if done then
+                done(false, stderr)
+              end
+            end,
             success = function(output)
               ---@type octo.mutations.AddPullRequestReviewCommitThread
               local r = vim.json.decode(output)
@@ -761,8 +839,14 @@ function OctoBuffer:do_add_new_thread(comment_metadata)
                   end
                   self:render_signs()
                 end
+                if done then
+                  done(true)
+                end
               else
                 utils.error "Failed to create thread"
+                if done then
+                  done(false, "Failed to create thread")
+                end
                 return
               end
             end,
@@ -774,10 +858,17 @@ function OctoBuffer:do_add_new_thread(comment_metadata)
 end
 
 ---Replies a review thread w/o creating a new review
-function OctoBuffer:do_add_pull_request_comment(comment_metadata)
+---@param comment_metadata CommentMetadata
+---@param done? fun(ok: boolean, err: string|nil): nil called once GitHub has answered;
+---  nil on the inline path, which behaves exactly as before
+function OctoBuffer:do_add_pull_request_comment(comment_metadata, done)
   local current_review = require("octo.reviews").get_current_review()
   if not utils.is_blank(current_review) then
-    utils.error "Please submit or discard the current review before adding a comment"
+    local message = "Please submit or discard the current review before adding a comment"
+    utils.error(message)
+    if done then
+      done(false, message)
+    end
     return
   end
   gh.run {
@@ -795,6 +886,9 @@ function OctoBuffer:do_add_pull_request_comment(comment_metadata)
     cb = function(output, stderr)
       if not utils.is_blank(stderr) then
         utils.error(stderr)
+        if done then
+          done(false, stderr)
+        end
       elseif output then
         local resp = vim.json.decode(output)
         if not utils.is_blank(resp) then
@@ -810,8 +904,14 @@ function OctoBuffer:do_add_pull_request_comment(comment_metadata)
             end
             self:render_signs()
           end
+          if done then
+            done(true)
+          end
         else
           utils.error "Failed to create thread"
+          if done then
+            done(false, "Failed to create thread")
+          end
           return
         end
       end

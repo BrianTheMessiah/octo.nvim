@@ -13,6 +13,7 @@ local window = require "octo.ui.window"
 local writers = require "octo.ui.writers"
 local utils = require "octo.utils"
 local config = require "octo.config"
+local drafts = require "octo.drafts"
 local vim = vim
 
 -- a global variable where command handlers can access the details of the last
@@ -150,6 +151,9 @@ function M.setup()
     end,
     search = function(...)
       M.search(...)
+    end,
+    submit = function()
+      M.submit()
     end,
     limits = function()
       require("octo.ratelimit").show_rate_limits()
@@ -1261,12 +1265,266 @@ function M.octo(object, action, ...)
   end
 end
 
+---Decides what kind of comment the cursor position implies, and gathers the
+---identifiers needed to create it.
+---
+---Pure with respect to windows and buffers: it reads buffer state and returns a
+---description, touching nothing. Both the inline renderer and the popup consume
+---the result, which is why the branching lives here rather than in either one.
+---@param buffer OctoBuffer the buffer the cursor is in
+---@param review table|nil the current review, as reviews.get_current_review() returns
+---@return table|nil target { kind, replyTo, replyToRest, reviewId, thread }, nil on error
+---@return string|nil err a message when target is nil
+function M.classify_comment_target(buffer, review)
+  local thread = buffer:get_thread_at_cursor()
+  local has_thread = not utils.is_blank(thread)
+  local is_review_thread = buffer:isReviewThread()
+
+  if has_thread and is_review_thread then
+    if review == nil or review.id == -1 then
+      return nil, "Please start or resume a review first"
+    end
+    return {
+      kind = "PullRequestReviewComment",
+      replyTo = thread.replyTo,
+      replyToRest = thread.replyToRest,
+      reviewId = review.id,
+      thread = thread,
+    },
+      nil
+  end
+
+  if has_thread and not is_review_thread then
+    return {
+      kind = "PullRequestComment",
+      replyTo = thread.replyTo,
+      replyToRest = thread.replyToRest,
+      thread = thread,
+    },
+      nil
+  end
+
+  if is_review_thread then
+    return nil, "Error adding a comment to a review thread"
+  end
+
+  return {
+    kind = buffer:isDiscussion() and "DiscussionComment" or "IssueComment",
+  }, nil
+end
+
+---Maps a comment kind onto its `style_overrides` slot.
+---@type table<string, string>
+local STYLE_SLOT = {
+  IssueComment = "issue",
+  PullRequestComment = "pull_request",
+  PullRequestReviewComment = "review_thread",
+  DiscussionComment = "discussion",
+}
+
+---Whether this comment kind composes in a popup or inline.
+---@param kind string one of the four comment kinds
+---@return string style "popup" or "inline"
+function M.comment_style_for(kind)
+  -- `commands.lua:15` already binds this module as `config`, not `octo_config`.
+  local comments = config.values.comments or {}
+  local slot = STYLE_SLOT[kind]
+  local override = slot and (comments.style_overrides or {})[slot] or nil
+  return override or comments.style or "popup"
+end
+
+---Whether a `replyTo` value names a real, already-existing comment.
+---
+---A brand-new review thread that has not been posted yet is represented by the
+---numeric sentinel `-1` (`ReviewThread.default_id`, `reviews/thread.lua`), which
+---`utils.is_blank` does not catch: `-1` is a non-nil, non-string, non-table
+---value, so it reads as truthy everywhere a plain `replyTo and ... or ...` or
+---`not utils.is_blank(replyTo)` check is used.
+---@param reply_to any target.replyTo, as classify_comment_target sets it
+---@return boolean
+local function has_real_reply_to(reply_to)
+  return not utils.is_blank(reply_to) and reply_to ~= -1
+end
+
+---Builds the draft key for a classified target, or nil when drafts are off.
+---
+---Returning nil is how `comments.drafts.enabled = false` is honoured: the popup
+---treats a nil key as "do not persist". `buffer.number` is folded into the repo
+---field rather than passed as its own argument, because `drafts.key` only takes
+---three fields and the third is already `target.replyTo`: without the number,
+---every top-level draft (`replyTo == nil`) in a repo -- one per issue, one per
+---PR -- collapsed onto the same key.
+---
+---`target.replyTo` is normalised through has_real_reply_to before being handed
+---to drafts.key: that field is meant to be a string id or nil, but the -1 stub
+---sentinel is a number, and drafts.key's field encoder calls `:gsub` on it
+---unconditionally. Passing -1 through unchanged is a guaranteed crash, not
+---just a wrong key.
+---@param buffer OctoBuffer
+---@param target table as classify_comment_target returns
+---@return string|nil key
+local function draft_key_for(buffer, target)
+  local comments = config.values.comments or {}
+  if not (comments.drafts or {}).enabled then
+    return nil
+  end
+  local repo_and_number = string.format("%s#%s", buffer.repo or "unknown", tostring(buffer.number or "?"))
+  local reply_to = has_real_reply_to(target.replyTo) and target.replyTo or nil
+  return drafts.key(repo_and_number, target.kind, reply_to)
+end
+
+---Reattaches quoted context to a composed body for kinds GitHub cannot thread
+---natively.
+---
+---Issue and PR-conversation comments (both classified as "IssueComment") have
+---no reply relationship on GitHub's side: the quote *is* the only link back to
+---what is being answered, so it must end up in the published body. Kinds with
+---a real `replyTo` (PullRequestComment, PullRequestReviewComment) or a real
+---GraphQL thread id (DiscussionComment) already thread structurally and do not
+---need it repeated in the body.
+---
+---`quote_text` must come from `comment_popup.context_body(bufnr)`, read fresh
+---at submit time -- never from the `context` array `compose_in_popup` passed
+---to `comment_popup.open`. The context region is editable, not read-only
+---display (I1 fixed the read-only *bug*, not made it read-only *by design*:
+---trimming a long quote down to the relevant line is legitimate editing), so
+---the array captured at open time goes stale the instant the user changes
+---what is above the separator. Publishing that stale capture would either
+---resurrect text the user deliberately trimmed away, or -- if they deleted
+---the quote entirely -- publish a quote the user asked to not include.
+---@param kind string a classify_comment_target kind
+---@param quote_text string the popup's current context region, from comment_popup.context_body
+---@param body string the composed, editable body
+---@return string body with the quote reattached when the kind requires it
+local function body_with_quote(kind, quote_text, body)
+  if kind ~= "IssueComment" or utils.is_blank(vim.trim(quote_text)) then
+    return body
+  end
+  return quote_text .. "\n\n" .. body
+end
+
+---Opens the compose popup for a classified target and submits through the
+---buffer's existing do_add_* methods.
+---@param buffer OctoBuffer
+---@param target table as classify_comment_target returns
+---@param context string[]|nil quoted lines shown above the compose region
+---@return nil
+function M.compose_in_popup(buffer, target, context)
+  if target.kind == "PullRequestReviewComment" and not has_real_reply_to(target.replyTo) then
+    -- do_add_new_thread needs .path, .diffSide, .snippetStartLine and
+    -- .snippetEndLine, none of which the popup collects: dispatching here
+    -- would send GitHub an input it can only reject. Refuse before opening the
+    -- popup at all, rather than composing and rejecting on submit.
+    utils.error "Cannot start a new review thread from the popup. Start it from the diff instead."
+    return
+  end
+
+  local comment_popup = require "octo.ui.comment-popup"
+  comment_popup.open {
+    target = target,
+    context = context,
+    draft_key = draft_key_for(buffer, target),
+    title = has_real_reply_to(target.replyTo) and "Reply" or "New comment",
+    on_submit = function(body, popup_bufnr, done)
+      local metadata = {
+        id = -1,
+        body = body_with_quote(target.kind, comment_popup.context_body(popup_bufnr), body),
+        kind = target.kind,
+        replyTo = target.replyTo,
+        replyToRest = target.replyToRest,
+        reviewId = target.reviewId,
+        savedBody = "",
+        dirty = true,
+      }
+
+      ---Runs once the do_add_* mutation has actually resolved (C1): only then
+      ---is it safe to tell the popup to discard the draft and tear itself down,
+      ---and only on success is it safe to reload.
+      ---@param ok boolean whether GitHub accepted the mutation
+      ---@param err string|nil the failure reason, when ok is false
+      local function after_dispatch(ok, err)
+        if not ok then
+          done(false, err)
+          return
+        end
+        done(true)
+
+        -- A review-thread buffer's do_add_thread_comment already refreshes the
+        -- thread panel via review:update_threads. Its buffer name
+        -- (octo://.../review/<id>/threads/...) does not parse as one of
+        -- M.load's known kinds, so routing it through M.reload here would ask
+        -- gh.api.graphql for a query it was never given -- silently, since
+        -- that failure raises no Lua error for this pcall to catch (I2).
+        if buffer:isReviewThread() then
+          return
+        end
+
+        -- The do_add_* success callbacks backfill the inline placeholder this
+        -- path never creates, so the posted comment is only rendered by a
+        -- reload.
+        --
+        -- A reload that fails leaves the comment posted and the buffer stale.
+        -- Say so rather than retrying: a retry here risks a second identical
+        -- comment.
+        local reloaded = pcall(M.reload, { verbose = false })
+        if not reloaded then
+          utils.error "Comment posted, but the buffer could not be refreshed. Run `:Octo pr reload`."
+        end
+      end
+
+      local ok, err = pcall(function()
+        if target.kind == "IssueComment" then
+          buffer:do_add_issue_comment(metadata, after_dispatch)
+        elseif target.kind == "DiscussionComment" then
+          buffer:do_add_discussion_comment(metadata, after_dispatch)
+        elseif target.kind == "PullRequestComment" then
+          buffer:do_add_pull_request_comment(metadata, after_dispatch)
+        elseif target.kind == "PullRequestReviewComment" then
+          buffer:do_add_thread_comment(metadata, after_dispatch)
+        end
+      end)
+      if not ok then
+        done(false, tostring(err))
+      end
+    end,
+  }
+end
+
 --- Adds a new comment to an issue/PR or a review thread
 function M.add_pr_issue_or_review_thread_comment(body)
   body = body or " "
   local buffer = utils.get_current_buffer()
 
   if not buffer then
+    return
+  end
+
+  local target, classify_err = M.classify_comment_target(buffer, reviews.get_current_review())
+  if not target then
+    utils.error(classify_err)
+    return
+  end
+  if M.comment_style_for(target.kind) == "popup" then
+    local is_reply = body and body ~= " "
+    local context = nil
+    if is_reply then
+      context = vim.split(vim.trim(body), "\n")
+
+      -- classify_comment_target only inspects review threads (get_thread_at_cursor),
+      -- never a plain comment under the cursor, so a discussion reply never got a
+      -- replyTo here -- unlike the inline path just below, which computes its own
+      -- independently of what classify returned. Compute it the same way, but only
+      -- for a reply: doing this for a plain "add" would turn "Reply to comment?"
+      -- from a question the inline path still asks into a default nobody agreed to.
+      if target.kind == "DiscussionComment" and target.replyTo == nil then
+        local comment_under_cursor = buffer:get_comment_at_cursor()
+        if not utils.is_blank(comment_under_cursor) then
+          target.replyTo = not utils.is_blank(comment_under_cursor.replyTo) and comment_under_cursor.replyTo.id
+            or comment_under_cursor.id
+        end
+      end
+    end
+    M.compose_in_popup(buffer, target, context)
     return
   end
 
@@ -1291,30 +1549,15 @@ function M.add_pr_issue_or_review_thread_comment(body)
     },
   }
 
-  local _thread = buffer:get_thread_at_cursor()
-  if not utils.is_blank(_thread) and buffer:isReviewThread() then
-    comment_kind = "PullRequestReviewComment"
-
-    -- are we trying to add a review comment while in 'review browse' mode?
-    local current_review = reviews.get_current_review()
-    if current_review == nil or current_review.id == -1 then
-      utils.error "Please start or resume a review first"
-      return
-    end
-
-    comment.pullRequestReview = { id = current_review.id }
+  local comment_kind = target.kind
+  local _thread = target.thread
+  comment.replyTo = target.replyTo
+  comment.replyToRest = target.replyToRest
+  if target.reviewId then
+    comment.pullRequestReview = { id = target.reviewId }
     comment.state = "PENDING"
-    comment.replyTo = _thread.replyTo
-    comment.replyToRest = _thread.replyToRest
-  elseif not utils.is_blank(_thread) and not buffer:isReviewThread() then
-    comment_kind = "PullRequestComment"
+  elseif comment_kind == "PullRequestComment" then
     comment.state = ""
-    comment.replyTo = _thread.replyTo
-    comment.replyToRest = _thread.replyToRest
-  elseif utils.is_blank(_thread) and not buffer:isReviewThread() then
-    comment_kind = buffer:isDiscussion() and "DiscussionComment" or "IssueComment"
-  elseif utils.is_blank(_thread) and buffer:isReviewThread() then
-    utils.error "Error adding a comment to a review thread"
   end
 
   if comment_kind == "IssueComment" then
@@ -2922,6 +3165,13 @@ function M.actions()
   end
 
   picker.actions(flattened_actions)
+end
+
+---Publishes every pending change in the current octo buffer: title, body,
+---new comments and edits to existing ones.
+---@return nil
+function M.submit()
+  require("octo").save_buffer()
 end
 
 function M.search(...)

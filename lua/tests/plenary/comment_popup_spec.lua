@@ -119,6 +119,63 @@ describe("octo.ui.comment-popup:", function()
     eq(false, vim.api.nvim_win_is_valid(winid))
   end)
 
+  it("keeps the body correct after deleting a quoted context line above the separator", function()
+    local _, bufnr = open {
+      target = { kind = "PullRequestComment" },
+      context = { "quote line one", "quote line two" },
+      draft_key = "k15",
+      on_submit = function() end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 3, -1, false, { "my first line", "my second line" })
+    eq("my first line\nmy second line", comment_popup.body(bufnr))
+
+    -- Delete the first quoted context line the way a user editing in the
+    -- window would: it sits above the separator, and nothing marks it
+    -- read-only.
+    vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, {})
+
+    eq("my first line\nmy second line", comment_popup.body(bufnr))
+  end)
+
+  it("keeps the body correct after adding a line above the separator", function()
+    local _, bufnr = open {
+      target = { kind = "PullRequestComment" },
+      context = { "quote line one" },
+      draft_key = "k16",
+      on_submit = function() end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 2, -1, false, { "my first line", "my second line" })
+    eq("my first line\nmy second line", comment_popup.body(bufnr))
+
+    -- Insert a new line above the separator, the way a user extending their
+    -- quote in the window would.
+    vim.api.nvim_buf_set_lines(bufnr, 1, 1, false, { "quote line two" })
+
+    eq("my first line\nmy second line", comment_popup.body(bufnr))
+  end)
+
+  it("refuses to submit when the separator itself is deleted", function()
+    local called = false
+    local _, bufnr = open {
+      target = { kind = "PullRequestComment" },
+      context = { "quote line one" },
+      draft_key = "k17",
+      on_submit = function()
+        called = true
+      end,
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 2, -1, false, { "my first line", "my second line" })
+
+    -- Delete the separator line itself (line 2: "quote line one" is line 1).
+    vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, {})
+
+    eq(nil, comment_popup.body(bufnr))
+
+    comment_popup.submit(bufnr)
+
+    eq(false, called)
+  end)
+
   it("keeps the window open and the draft on disk when submit fails", function()
     local winid, bufnr = open {
       target = { kind = "IssueComment" },
@@ -135,7 +192,7 @@ describe("octo.ui.comment-popup:", function()
     eq("keep me", drafts.load "k7")
   end)
 
-  it("binds both submit keys buffer-locally in both normal and insert mode", function()
+  it("binds <leader>op in normal mode only, and <C-s> in both normal and insert mode", function()
     local _, bufnr = open {
       target = { kind = "IssueComment" },
       draft_key = "k11",
@@ -159,10 +216,15 @@ describe("octo.ui.comment-popup:", function()
     eq(true, normal["\\op"] ~= nil or normal["<Leader>op"] ~= nil)
     eq(true, normal["<C-S>"] ~= nil or normal["<C-s>"] ~= nil)
 
-    -- Insert mode is the half that matters most: <C-s> is globally
+    -- <leader>op is "\" followed by prose characters that appear naturally
+    -- while composing free text (paths, "\operatorname", "\options"), so it
+    -- must not be reachable in insert mode: every "\" typed there would
+    -- otherwise stall for timeoutlen and risk submitting mid-sentence.
+    eq(false, insert["\\op"] ~= nil or insert["<Leader>op"] ~= nil)
+
+    -- Insert mode is the half that matters most for <C-s>: it is globally
     -- vim.lsp.buf.signature_help() in insert mode, so losing this binding
     -- means pressing it mid-compose pops LSP help instead of submitting.
-    eq(true, insert["\\op"] ~= nil or insert["<Leader>op"] ~= nil)
     eq(true, insert["<C-S>"] ~= nil or insert["<C-s>"] ~= nil)
   end)
 

@@ -14,22 +14,55 @@ local state = {}
 ---Milliseconds of typing quiet before a draft is written to disk.
 local PERSIST_DELAY_MS = 300
 
----The first line of the compose region, 1-indexed.
+---Finds the compose-mark separator by content, not by a stored offset.
+---
+---The context region above it is not read-only, so a line count captured at
+---open time goes stale the moment the user adds or deletes a line above the
+---separator. Searching for the mark itself is the only offset that cannot
+---drift out from under an edit.
 ---@param bufnr integer
----@return integer line
-local function compose_start(bufnr)
-  return state[bufnr].context_height + 1
+---@return integer? line 1-indexed line number of the separator, or nil if absent
+local function find_separator(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  for i, line in ipairs(lines) do
+    if line == M.COMPOSE_MARK then
+      return i
+    end
+  end
+  return nil
 end
 
 ---The composed comment text, excluding context and separator.
+---
+---The separator is located fresh on every call by find_separator, not read
+---from a line count captured when the popup opened: the context region is
+---not read-only, so a stored offset would silently include or exclude lines
+---the user never meant as part of the comment. When the popup opened with
+---context and that separator has since been deleted, there is no line left
+---that reliably marks where context ends and the user's own words begin, so
+---this returns nil instead of guessing -- callers must treat nil as "cannot
+---submit", never as "empty body".
 ---@param bufnr integer
----@return string body
+---@return string? body
 function M.body(bufnr)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, compose_start(bufnr) - 1, -1, false)
+  local entry = state[bufnr]
+  local separator = find_separator(bufnr)
+  if separator then
+    local lines = vim.api.nvim_buf_get_lines(bufnr, separator, -1, false)
+    return table.concat(lines, "\n")
+  end
+  if entry and entry.context_height > 0 then
+    return nil
+  end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   return table.concat(lines, "\n")
 end
 
 ---Writes the current body to the draft store, or clears it when blank.
+---
+---A nil body (the separator was deleted; see M.body) is left untouched: the
+---last known-good draft on disk stays as it was rather than being clobbered
+---by an edit we cannot safely interpret.
 ---@param bufnr integer
 ---@return nil
 local function persist(bufnr)
@@ -38,6 +71,9 @@ local function persist(bufnr)
     return
   end
   local body = M.body(bufnr)
+  if body == nil then
+    return
+  end
   if utils.is_blank(vim.trim(body)) then
     drafts.discard(entry.draft_key)
   else
@@ -111,6 +147,15 @@ function M.submit(bufnr)
     return
   end
   local body = M.body(bufnr)
+  if body == nil then
+    utils.error(
+      "Cannot submit: the '"
+        .. M.COMPOSE_MARK
+        .. "' separator was deleted, so context and your comment can no longer be told apart."
+        .. " Restore the separator line, or close and reopen the popup to discard the context."
+    )
+    return
+  end
   if utils.is_blank(vim.trim(body)) then
     utils.error "Nothing to submit: the comment is empty"
     return
@@ -194,15 +239,29 @@ function M.open(opts)
 
   local map_opts = { buffer = bufnr, silent = true, noremap = true }
 
-  -- Both submit keys are bound buffer-locally, and `<leader>op` must be among
-  -- them even though switchboard installs a global `\op`: that global runs
-  -- `:Octo submit`, which would call save_buffer() on this scratch buffer rather
-  -- than sending the comment. A buffer-local mapping shadows it.
-  for _, lhs in ipairs { "<leader>op", "<C-s>" } do
-    vim.keymap.set({ "n", "i" }, lhs, function()
+  -- `<leader>op` must be bound buffer-locally even though switchboard installs
+  -- a global `\op`: that global runs `:Octo submit`, which would call
+  -- save_buffer() on this scratch buffer rather than sending the comment. A
+  -- buffer-local mapping shadows it. It is normal-mode only: `<leader>` is
+  -- `\`, and this buffer holds free-form prose, so `C:\opt\...`,
+  -- `\operatorname` or `\options` typed in insert mode would submit
+  -- mid-sentence (and stall for timeoutlen on every `\` besides).
+  --
+  -- `<C-s>` is bound in both modes: unlike `<leader>op` it is not a prose
+  -- character sequence, and dropping the insert-mode binding would fall
+  -- through to the global `<C-s>` map, `vim.lsp.buf.signature_help()`,
+  -- popping LSP help instead of submitting mid-compose.
+  vim.keymap.set(
+    "n",
+    "<leader>op",
+    function()
       M.submit(bufnr)
-    end, vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" }))
-  end
+    end,
+    vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" })
+  )
+  vim.keymap.set({ "n", "i" }, "<C-s>", function()
+    M.submit(bufnr)
+  end, vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" }))
 
   vim.keymap.set("n", "q", function()
     M.cancel(bufnr)

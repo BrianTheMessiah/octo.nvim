@@ -13,6 +13,8 @@ local html = require "octo.ui.html"
 local preview_cache = require "octo.pickers.fzf-lua.preview_cache"
 local preview_markdown = require "octo.pickers.fzf-lua.preview_markdown"
 local preview_prefetch = require "octo.pickers.fzf-lua.preview_prefetch"
+local preview_throttle = require "octo.pickers.fzf-lua.preview_throttle"
+local preview_warmer = require "octo.pickers.fzf-lua.preview_warmer"
 
 local M = {}
 
@@ -85,9 +87,9 @@ end
 ---@return string? query nil for a kind that has no preview query
 local function preview_query(kind, owner, name, number)
   if kind == "issue" then
-    return graphql("issue_query", owner, name, number, _G.octo_pv2_fragment)
+    return graphql("issue_preview_query", owner, name, number, _G.octo_pv2_fragment)
   elseif kind == "pull_request" then
-    return graphql("pull_request_query", owner, name, number, _G.octo_pv2_fragment)
+    return graphql("pull_request_preview_query", owner, name, number, _G.octo_pv2_fragment)
   end
 end
 
@@ -95,16 +97,19 @@ end
 ---@param kind string octo entry kind, "issue" or "pull_request"
 ---@param output string raw JSON returned by `gh api graphql`
 ---@return table? node nil when the response cannot be decoded or holds no node
+---@return integer? remaining rate limit points left, when the response reported them
 local function decode_preview(kind, output)
   local ok, result = pcall(vim.json.decode, output)
   if not ok or type(result) ~= "table" or not result.data or not result.data.repository then
-    return nil
+    return nil, nil
   end
+  local remaining = type(result.data.rateLimit) == "table" and tonumber(result.data.rateLimit.remaining) or nil
   if kind == "issue" then
-    return result.data.repository.issue
+    return result.data.repository.issue, remaining
   elseif kind == "pull_request" then
-    return result.data.repository.pullRequest
+    return result.data.repository.pullRequest, remaining
   end
+  return nil, remaining
 end
 
 ---Start one preview fetch. Writes nothing to any buffer or window: it decodes the
@@ -113,12 +118,12 @@ end
 ---@param kind string octo entry kind, "issue" or "pull_request"
 ---@param repo string "owner/name" the item belongs to
 ---@param number string|integer the issue or pull request number
----@param done fun(payload: table?) called with the decoded node, or nil on failure
+---@param done fun(payload: table?, remaining: integer?) called with the decoded node, or nil on failure
 local function fetch_preview(kind, repo, number, done)
   local owner, name = utils.split_repo(repo)
   local query = preview_query(kind, owner, name, number)
   if not query then
-    done(nil)
+    done(nil, nil)
     return
   end
   gh.api.graphql {
@@ -126,13 +131,20 @@ local function fetch_preview(kind, repo, number, done)
     opts = {
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
-          done(nil)
+          done(nil, nil)
         else
           done(decode_preview(kind, output))
         end
       end,
     },
   }
+end
+
+---Adapt `fetch_preview` to the shape a warmer wants: one entry in, payload out.
+---@param entry table the formatted picker entry to warm
+---@param done fun(payload: table?, remaining: integer?) called when the request ends
+local function fetch_entry(entry, done)
+  fetch_preview(entry.kind, entry.repo, entry.value, done)
 end
 
 ---A shallow copy of a payload whose body has had its inline HTML rewritten as
@@ -187,16 +199,34 @@ function M.issue(formatted_issues, order)
     return self
   end
 
-  local cache = preview_cache.new()
+  local cache = preview_cache.new(math.max(64, order and #order or 0))
   local positions ---@type table<string, integer>?
   local previous_position ---@type integer?
 
+  local warmer = preview_warmer.new {
+    cache = cache,
+    fetch = fetch_entry,
+    entries = function()
+      local loaded = {}
+      for _, entry_str in ipairs(order or {}) do
+        local entry = formatted_issues[entry_str]
+        if entry then
+          loaded[#loaded + 1] = entry
+        end
+      end
+      return loaded
+    end,
+  }
+
   ---Warm the cache for the entries just beyond the cursor, in its direction of
   ---travel. Warming writes only to the cache, never to a buffer or a window.
+  ---
+  ---Only used when the whole list is not being warmed; the two would otherwise race
+  ---to start the same requests, and this one answers to no concurrency cap.
   ---@param entry_str string the entry now under the cursor
   local function warm_neighbours(entry_str)
     local window = preview_prefetch.window()
-    if window == 0 or not order or #order == 0 then
+    if preview_throttle.prefetch_all() or window == 0 or not order or #order == 0 then
       return
     end
     if not positions or vim.tbl_count(positions) ~= #order then
@@ -219,6 +249,7 @@ function M.issue(formatted_issues, order)
   end
 
   function previewer:close(do_not_clear_cache)
+    warmer:stop()
     cache:abandon()
     return previewer.super.close(self, do_not_clear_cache)
   end
@@ -228,6 +259,7 @@ function M.issue(formatted_issues, order)
     local entry = formatted_issues[entry_str]
     local key = preview_cache.key(entry.kind, entry.repo, entry.value)
     self.octo_preview_key = key
+    warmer:warm()
 
     local cached = cache:get(key)
     if cached then
@@ -250,7 +282,10 @@ function M.issue(formatted_issues, order)
   return previewer
 end
 
-function M.search()
+---Previewer for a searched list of issues and pull requests.
+---@param formatted_items? table<string, table> entry by entry string, filled as results stream in; enables warming the whole list
+---@return octo.fzf-lua.Previewer
+function M.search(formatted_items)
   ---@type octo.fzf-lua.Previewer
   local previewer = M.bufferPreviewer:extend()
   previewer.octo_wrap = M.wrap_prose()
@@ -265,7 +300,20 @@ function M.search()
 
   local cache = preview_cache.new()
 
+  local warmer = preview_warmer.new {
+    cache = cache,
+    fetch = fetch_entry,
+    entries = function()
+      local loaded = {}
+      for _, entry in pairs(formatted_items or {}) do
+        loaded[#loaded + 1] = entry
+      end
+      return loaded
+    end,
+  }
+
   function previewer:close(do_not_clear_cache)
+    warmer:stop()
     cache:abandon()
     return previewer.super.close(self, do_not_clear_cache)
   end
@@ -280,6 +328,7 @@ function M.search()
     local repo = string.format("%s/%s", owner, name)
     local key = preview_cache.key(kind, repo, number)
     self.octo_preview_key = key
+    warmer:warm()
 
     local cached = cache:get(key)
     if cached then

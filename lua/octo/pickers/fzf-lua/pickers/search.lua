@@ -98,7 +98,7 @@ function M.open_scoped(snapshot, formatted_items, prompt_title, repo)
 
   fzf.fzf_exec(M.scoped_lines(snapshot, repo), {
     prompt = picker_utils.get_prompt(repo_scope.prompt(prompt_title, repo)),
-    previewer = previewers.search(),
+    previewer = previewers.search(formatted_items),
     fzf_opts = M.list_fzf_opts(),
     actions = M.list_actions(formatted_items, snapshot, narrow),
   })
@@ -191,7 +191,7 @@ function M.picker(opts)
   fzf.fzf_live(contents, {
     prompt = picker_utils.get_prompt(opts.prompt_title),
     exec_empty_query = true,
-    previewer = previewers.search(),
+    previewer = previewers.search(formatted_items),
     query_delay = 500,
     fzf_opts = M.list_fzf_opts(),
     actions = M.list_actions(formatted_items, snapshot, narrow),

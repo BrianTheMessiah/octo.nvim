@@ -199,6 +199,8 @@ require"octo".setup {
       copy_sha = { lhs = "<C-e>", desc = "copy commit SHA to system clipboard" },
       checkout_pr = { lhs = "<C-o>", desc = "checkout pull request" },
       merge_pr = { lhs = "<C-r>", desc = "merge pull request" },
+      filter_mine = { lhs = "<A-m>", desc = "narrow to pull requests you opened" },
+      filter_all = { lhs = "<A-a>", desc = "widen to all open pull requests" },
     },
     snacks = { -- snacks specific config
       -- Initialize actions as empty arrays
@@ -577,6 +579,20 @@ require"octo".setup {
   debug = {
     notify_missing_timeline_items = false,
   },
+  comments = {
+    style = "popup",
+    style_overrides = {
+      issue = nil,
+      pull_request = nil,
+      review_thread = nil,
+      discussion = nil,
+    },
+    drafts = {
+      enabled = true,
+      sweep_after_days = 30,
+    },
+  },
+  submit_on_write = false,
 }
 ```
 <!-- END_CONFIG -->

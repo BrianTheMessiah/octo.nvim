@@ -47,6 +47,7 @@ local M = {}
 ---@field mappings OctoPickerMappings
 ---@field snacks OctoPickerConfigSnacks -- Snacks specific config
 ---@field search_static boolean -- Whether to use static search results (true) or dynamic search (false)
+---@field preview_wrap boolean -- Soft-wrap prose previews (issue/PR bodies) in the fzf-lua preview window
 
 ---@class OctoConfigColors
 ---@field white string
@@ -190,6 +191,7 @@ function M.get_default_values()
     picker_config = {
       use_emojis = false, -- only used by "fzf-lua" picker for now
       search_static = true, -- Whether to use static search results (true) or dynamic search (false)
+      preview_wrap = true, -- soft-wrap prose previews (issue/PR bodies) in the fzf-lua preview window
       mappings = { -- mappings for the pickers
         open_in_browser = { lhs = "<C-b>", desc = "open issue in browser" },
         copy_url = { lhs = "<C-y>", desc = "copy url to system clipboard" },
@@ -665,6 +667,7 @@ function M.validate_config()
 
     validate_type(config.picker_config.use_emojis, "picker_config.use_emojis", "boolean")
     validate_type(config.picker_config.search_static, "picker_config.search_static", "boolean")
+    validate_type(config.picker_config.preview_wrap, "picker_config.preview_wrap", "boolean")
     if validate_type(config.picker_config.mappings, "picker_config.mappings", "table") then
       ---Checks that no two picker mappings convert to the same fzf key.
       ---

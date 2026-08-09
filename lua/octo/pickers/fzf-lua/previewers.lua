@@ -33,10 +33,22 @@ function M.bufferPreviewer:parse_entry(entry_str)
   }
 end
 
--- Disable line numbering and word wrap
+---Whether this previewer's content is prose that should soft-wrap. Diffs, patches,
+---review-thread snippets and source listings leave this false so their column
+---alignment survives.
+M.bufferPreviewer.octo_wrap = false
+
+---Whether prose previewers should soft-wrap, per `picker_config.preview_wrap`.
+---@return boolean true when long body lines should be wrapped rather than clipped
+function M.wrap_prose()
+  return config.values.picker_config.preview_wrap ~= false
+end
+
+---Window options for an octo preview: never numbered, wrapped only for prose.
+---@return table winopts merged over the previewer's own `winopts`
 function M.bufferPreviewer:gen_winopts()
   local new_winopts = {
-    wrap = false,
+    wrap = self.octo_wrap,
     number = false,
   }
   return vim.tbl_extend("force", self.winopts, new_winopts)
@@ -50,6 +62,7 @@ end
 function M.issue(formatted_issues)
   ---@type octo.fzf-lua.Previewer
   local previewer = M.bufferPreviewer:extend()
+  previewer.octo_wrap = M.wrap_prose()
 
   function previewer:new(o, opts, fzf_win)
     M.bufferPreviewer.super.new(self, o, opts, fzf_win)
@@ -110,6 +123,7 @@ end
 function M.search()
   ---@type octo.fzf-lua.Previewer
   local previewer = M.bufferPreviewer:extend()
+  previewer.octo_wrap = M.wrap_prose()
 
   function previewer:new(o, opts, fzf_win)
     M.bufferPreviewer.super.new(self, o, opts, fzf_win)
@@ -366,6 +380,7 @@ end
 function M.issue_template(formatted_templates)
   ---@type octo.fzf-lua.Previewer
   local previewer = M.bufferPreviewer:extend()
+  previewer.octo_wrap = M.wrap_prose()
 
   function previewer:new(o, opts, fzf_win)
     M.bufferPreviewer.super.new(self, o, opts, fzf_win)
@@ -396,6 +411,7 @@ end
 ---@return fzf-lua.previewer.BufferOrFile
 function M.notifications(formatted_notifications, cached_notification_infos)
   local previewer = M.bufferPreviewer:extend() ---@type fzf-lua.previewer.BufferOrFile
+  previewer.octo_wrap = M.wrap_prose()
 
   function previewer:new(o, opts, fzf_win)
     M.bufferPreviewer.super.new(self, o, opts, fzf_win)

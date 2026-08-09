@@ -196,4 +196,36 @@ describe("repository scope:", function()
       assert.is_nil(repo_scope.prompt(nil, repo_scope.ALL))
     end)
   end)
+
+  describe("what a list pinned to one repository reports", function()
+    ---Whether the message a pinned list reports holds a literal string.
+    ---@param repo string the `nameWithOwner` the list is confined to
+    ---@param lhs string the pressed key, written as a mapping writes it
+    ---@param text string the literal string to look for
+    ---@return boolean found true when the message holds it
+    local function reports(repo, lhs, text)
+      return repo_scope.pinned_message(repo, lhs):find(text, 1, true) ~= nil
+    end
+
+    it("names the repository the list cannot see past", function()
+      assert.is_true(reports("fii-org/service.core", "<A-r>", "fii-org/service.core"))
+    end)
+
+    it("names the key that was pressed, so the message answers the press", function()
+      assert.is_true(reports("fii-org/service.core", "<A-r>", "<A-r>"))
+    end)
+
+    it("quotes whatever key the mapping was rebound to", function()
+      assert.is_true(reports("fii-org/service.core", "<C-g>", "<C-g>"))
+    end)
+
+    it("points at the organisation-wide search the repository's owner has", function()
+      assert.is_true(reports("fii-org/service.core", "<A-r>", "Octo search is:pr is:open org:fii-org"))
+    end)
+
+    it("offers no organisation-wide search when the name carries no owner", function()
+      assert.is_true(reports("service.core", "<A-r>", "service.core"))
+      assert.is_false(reports("service.core", "<A-r>", "org:"))
+    end)
+  end)
 end)

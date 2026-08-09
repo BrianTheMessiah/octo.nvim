@@ -11,6 +11,7 @@ local writers = require "octo.ui.writers"
 local config = require "octo.config"
 local html = require "octo.ui.html"
 local preview_cache = require "octo.pickers.fzf-lua.preview_cache"
+local preview_markdown = require "octo.pickers.fzf-lua.preview_markdown"
 local preview_prefetch = require "octo.pickers.fzf-lua.preview_prefetch"
 
 local M = {}
@@ -41,18 +42,32 @@ end
 ---alignment survives.
 M.bufferPreviewer.octo_wrap = false
 
+---Whether this previewer renders markdown, and so needs conceal turned on. Only the
+---previewers that start a markdown highlighter set this: raising `conceallevel` over
+---the legacy regex syntax alone is what makes fixed-column content ragged.
+M.bufferPreviewer.octo_conceal = false
+
 ---Whether prose previewers should soft-wrap, per `picker_config.preview_wrap`.
 ---@return boolean true when long body lines should be wrapped rather than clipped
 function M.wrap_prose()
   return config.values.picker_config.preview_wrap ~= false
 end
 
----Window options for an octo preview: never numbered, wrapped only for prose.
+---Whether preview bodies should have their markdown rendered.
+---@return boolean true when it is both wanted and the treesitter parsers are present
+function M.render_markdown()
+  return preview_markdown.enabled() and preview_markdown.available()
+end
+
+---Window options for an octo preview: never numbered, wrapped only for prose, and
+---concealing only where a markdown highlighter supplies the conceal ranges.
 ---@return table winopts merged over the previewer's own `winopts`
 function M.bufferPreviewer:gen_winopts()
   local new_winopts = {
     wrap = self.octo_wrap,
     number = false,
+    conceallevel = self.octo_conceal and 2 or 0,
+    concealcursor = self.octo_conceal and "nvic" or "",
   }
   return vim.tbl_extend("force", self.winopts, new_winopts)
 end
@@ -142,12 +157,17 @@ local function render_preview(bufnr, kind, number, obj)
 
   writers.write_title(bufnr, obj.title, 1)
   writers.write_details(bufnr, obj, false, true)
+
+  local body_first = vim.api.nvim_buf_line_count(bufnr)
   writers.write_body(bufnr, with_rendered_body(obj))
+  local body_lines = vim.api.nvim_buf_get_lines(bufnr, body_first, -1, false)
+
   writers.write_state(bufnr, state:upper(), number)
   local reactions_line = vim.api.nvim_buf_line_count(bufnr) - 1
   writers.write_block(bufnr, { "", "" }, reactions_line)
   writers.write_reactions(bufnr, obj.reactionGroups, reactions_line)
   vim.bo[bufnr].filetype = "octo"
+  preview_markdown.render(bufnr, body_first, body_lines)
 end
 
 ---Previewer for a list of issues or pull requests.
@@ -158,6 +178,7 @@ function M.issue(formatted_issues, order)
   ---@type octo.fzf-lua.Previewer
   local previewer = M.bufferPreviewer:extend()
   previewer.octo_wrap = M.wrap_prose()
+  previewer.octo_conceal = M.render_markdown()
 
   function previewer:new(o, opts, fzf_win)
     M.bufferPreviewer.super.new(self, o, opts, fzf_win)
@@ -233,6 +254,7 @@ function M.search()
   ---@type octo.fzf-lua.Previewer
   local previewer = M.bufferPreviewer:extend()
   previewer.octo_wrap = M.wrap_prose()
+  previewer.octo_conceal = M.render_markdown()
 
   function previewer:new(o, opts, fzf_win)
     M.bufferPreviewer.super.new(self, o, opts, fzf_win)

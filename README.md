@@ -196,6 +196,7 @@ require"octo".setup {
     preview_wrap = true, -- soft-wrap prose previews (issue/PR bodies) in the fzf-lua preview window
     preview_prefetch = 5, -- how many entries beyond the cursor to fetch previews for ahead of time (0 disables)
     preview_render_html = true, -- rewrite the inline HTML in an issue or PR body as markdown in previews
+    preview_render_markdown = true, -- render the markdown in a preview body rather than showing its source
     mappings = { -- mappings for the pickers
       open_in_browser = { lhs = "<C-b>", desc = "open issue in browser" },
       copy_url = { lhs = "<C-y>", desc = "copy url to system clipboard" },
@@ -204,6 +205,7 @@ require"octo".setup {
       merge_pr = { lhs = "<C-r>", desc = "merge pull request" },
       filter_mine = { lhs = "<A-m>", desc = "narrow to pull requests you opened" },
       filter_all = { lhs = "<A-a>", desc = "widen to all open pull requests" },
+      filter_repo = { lhs = "<A-r>", desc = "narrow the loaded pull requests to one repository" },
     },
     snacks = { -- snacks specific config
       -- Initialize actions as empty arrays

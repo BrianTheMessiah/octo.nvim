@@ -90,6 +90,7 @@ function M.picker(opts)
   local prompt_title = utils.pop_key(opts, "prompt_title")
 
   local formatted_pulls = {} ---@type table<string, table> entry.ordinal -> entry
+  local pull_order = {} ---@type string[] entry.ordinal in list order
 
   local function get_contents(fzf_cb)
     local query, fields, jq = M.build_query(opts, owner, name)
@@ -120,6 +121,7 @@ function M.picker(opts)
 
               if entry ~= nil then
                 formatted_pulls[entry.ordinal] = entry
+                table.insert(pull_order, entry.ordinal)
                 local highlight
                 if entry.obj.isDraft then
                   highlight = "OctoSymbol"
@@ -141,7 +143,7 @@ function M.picker(opts)
 
   fzf.fzf_exec(get_contents, {
     prompt = picker_utils.get_prompt(prompt_title),
-    previewer = previewers.issue(formatted_pulls),
+    previewer = previewers.issue(formatted_pulls, pull_order),
     fzf_opts = {
       ["--no-multi"] = "", -- TODO this can support multi, maybe.
       ["--info"] = "default",

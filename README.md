@@ -193,12 +193,17 @@ require"octo".setup {
   picker_config = {
     use_emojis = false, -- only used by "fzf-lua" picker for now
     search_static = true, -- Whether to use static search results (true) or dynamic search (false)
+    preview_wrap = true, -- soft-wrap prose previews (issue/PR bodies) in the fzf-lua preview window
+    preview_prefetch = 5, -- how many entries beyond the cursor to fetch previews for ahead of time (0 disables)
+    preview_render_html = true, -- rewrite the inline HTML in an issue or PR body as markdown in previews
     mappings = { -- mappings for the pickers
       open_in_browser = { lhs = "<C-b>", desc = "open issue in browser" },
       copy_url = { lhs = "<C-y>", desc = "copy url to system clipboard" },
       copy_sha = { lhs = "<C-e>", desc = "copy commit SHA to system clipboard" },
       checkout_pr = { lhs = "<C-o>", desc = "checkout pull request" },
       merge_pr = { lhs = "<C-r>", desc = "merge pull request" },
+      filter_mine = { lhs = "<A-m>", desc = "narrow to pull requests you opened" },
+      filter_all = { lhs = "<A-a>", desc = "widen to all open pull requests" },
     },
     snacks = { -- snacks specific config
       -- Initialize actions as empty arrays
@@ -577,6 +582,20 @@ require"octo".setup {
   debug = {
     notify_missing_timeline_items = false,
   },
+  comments = {
+    style = "popup",
+    style_overrides = {
+      issue = nil,
+      pull_request = nil,
+      review_thread = nil,
+      discussion = nil,
+    },
+    drafts = {
+      enabled = true,
+      sweep_after_days = 30,
+    },
+  },
+  submit_on_write = false,
 }
 ```
 <!-- END_CONFIG -->

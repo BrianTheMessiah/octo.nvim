@@ -9,6 +9,7 @@ local queries = require "octo.gh.queries"
 local utils = require "octo.utils"
 local writers = require "octo.ui.writers"
 local config = require "octo.config"
+local html = require "octo.ui.html"
 
 local M = {}
 
@@ -59,6 +60,18 @@ function M.bufferPreviewer:update_border(title)
   self.win:update_preview_scrollbar()
 end
 
+---A shallow copy of a payload whose body has had its inline HTML rewritten as
+---markdown. The response itself is never mutated, so the transform is derived per
+---paint and can never compound.
+---@param obj table decoded issue or pull request node
+---@return table obj to hand to the writers
+local function with_rendered_body(obj)
+  if config.values.picker_config.preview_render_html == false then
+    return obj
+  end
+  return vim.tbl_extend("keep", { body = html.to_markdown(obj.body) }, obj)
+end
+
 function M.issue(formatted_issues)
   ---@type octo.fzf-lua.Previewer
   local previewer = M.bufferPreviewer:extend()
@@ -101,7 +114,7 @@ function M.issue(formatted_issues)
 
               writers.write_title(tmpbuf, obj.title, 1)
               writers.write_details(tmpbuf, obj, false, true) -- include_status = true for preview
-              writers.write_body(tmpbuf, obj)
+              writers.write_body(tmpbuf, with_rendered_body(obj))
               writers.write_state(tmpbuf, state:upper(), number)
               local reactions_line = vim.api.nvim_buf_line_count(tmpbuf) - 1
               writers.write_block(tmpbuf, { "", "" }, reactions_line)
@@ -164,7 +177,7 @@ function M.search()
 
               writers.write_title(tmpbuf, obj.title, 1)
               writers.write_details(tmpbuf, obj, false, true) -- include_status = true for preview
-              writers.write_body(tmpbuf, obj)
+              writers.write_body(tmpbuf, with_rendered_body(obj))
               writers.write_state(tmpbuf, state:upper(), number)
               local reactions_line = vim.api.nvim_buf_line_count(tmpbuf) - 1
               writers.write_block(tmpbuf, { "", "" }, reactions_line)

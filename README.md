@@ -194,6 +194,7 @@ require"octo".setup {
     use_emojis = false, -- only used by "fzf-lua" picker for now
     search_static = true, -- Whether to use static search results (true) or dynamic search (false)
     preview_wrap = true, -- soft-wrap prose previews (issue/PR bodies) in the fzf-lua preview window
+    preview_render_html = true, -- rewrite the inline HTML in an issue or PR body as markdown in previews
     mappings = { -- mappings for the pickers
       open_in_browser = { lhs = "<C-b>", desc = "open issue in browser" },
       copy_url = { lhs = "<C-y>", desc = "copy url to system clipboard" },

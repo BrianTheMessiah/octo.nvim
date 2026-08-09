@@ -280,7 +280,7 @@ describe("octo.reviews.help-bar winbar:", function()
 
   it("paints the bar in its own highlight group", function()
     two_windows("file_panel", "submit_win")
-    assert.is_truthy(help_bar.winbar():find("%%#OctoReviewHelpBar#"), help_bar.winbar())
+    assert.is_truthy(help_bar.winbar():find "%%#OctoReviewHelpBar#", help_bar.winbar())
   end)
 end)
 

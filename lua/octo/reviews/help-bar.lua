@@ -203,11 +203,14 @@ function M.kind(bufnr)
   return M.LABELS[kind] and kind or nil
 end
 
---- Text cut to fit, with a mark where it was cut.
+--- The mark that says the bar had more to show than it had room for.
+M.CUT = "…"
+
+--- Text cut to fit, with the mark where it was cut.
 ---
 --- Measured in display columns, because the leader and any key drawn through it
 --- can be more than one byte wide and a byte count would cut the line early.
----@param text string the finished line, however long it came out
+---@param text string the text, however long it came out
 ---@param width integer columns available
 ---@return string
 function M.truncate(text, width)
@@ -215,8 +218,7 @@ function M.truncate(text, width)
     return text
   end
 
-  local mark = "…"
-  local room = width - vim.fn.strdisplaywidth(mark)
+  local room = width - vim.fn.strdisplaywidth(M.CUT)
   if room < 1 then
     return vim.fn.strcharpart(text, 0, width)
   end
@@ -225,7 +227,40 @@ function M.truncate(text, width)
   while chars > 0 and vim.fn.strdisplaywidth(vim.fn.strcharpart(text, 0, chars)) > room do
     chars = chars - 1
   end
-  return vim.fn.strcharpart(text, 0, chars) .. mark
+  return vim.fn.strcharpart(text, 0, chars) .. M.CUT
+end
+
+--- The keys that fit, joined, each one drawn whole.
+---
+--- Stops at the first key too wide to finish rather than cutting through one,
+--- because half a label reads as a different action. Grown one key at a time so
+--- the columns are counted once per key rather than once per character of a line
+--- most of which is about to be thrown away -- this runs on every redraw.
+---@param parts string[] each key with its label, in the order they are drawn
+---@param width integer columns available for the keys
+---@return string
+local function keys_that_fit(parts, width)
+  local separator = "  "
+  local tail = #separator + vim.fn.strdisplaywidth(M.CUT)
+  local kept, used = {}, 0
+
+  for _, part in ipairs(parts) do
+    local cost = vim.fn.strdisplaywidth(part) + (#kept > 0 and #separator or 0)
+    if used + cost > width then
+      while #kept > 0 and used + tail > width do
+        local dropped = table.remove(kept)
+        used = used - vim.fn.strdisplaywidth(dropped) - (#kept > 0 and #separator or 0)
+      end
+      if #kept == 0 then
+        return M.truncate(parts[1], width)
+      end
+      return table.concat(kept, separator) .. separator .. M.CUT
+    end
+    kept[#kept + 1] = part
+    used = used + cost
+  end
+
+  return table.concat(kept, separator)
 end
 
 --- The bar's single line for one review context.
@@ -246,8 +281,13 @@ function M.line(kind, width, handlers)
     parts[1] = "no keys mapped"
   end
 
-  local text = (" %s   %s"):format(M.LABELS[kind] or kind, table.concat(parts, "  "))
-  return (M.truncate(text, width):gsub("%%", "%%%%"))
+  local opening = (" %s   "):format(M.LABELS[kind] or kind)
+  local room = width - vim.fn.strdisplaywidth(opening)
+  if room < 1 then
+    return (M.truncate(opening, width):gsub("%%", "%%%%"))
+  end
+
+  return ((opening .. keys_that_fit(parts, room)):gsub("%%", "%%%%"))
 end
 
 --- The bar as the window it hangs on redraws it.

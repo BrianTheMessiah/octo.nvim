@@ -156,6 +156,19 @@ describe("octo.reviews.help-bar line:", function()
     end
   end)
 
+  it("cuts between keys rather than through one, so no key is drawn half-written", function()
+    local whole = {}
+    for _, entry in ipairs(help_bar.entries "review_diff") do
+      whole[("%s %s"):format(entry.lhs, entry.label)] = true
+    end
+
+    local line = help_bar.line("review_diff", 60)
+    local keys = line:gsub("^ diff   ", ""):gsub("…$", "")
+    for _, part in ipairs(vim.split(keys, "  ", { plain = true, trimempty = true })) do
+      assert.is_true(whole[part] == true, ("%q is not a whole key from %q"):format(part, line))
+    end
+  end)
+
   it("marks a line it had to cut, so a missing key does not read as no key", function()
     local line = help_bar.line("review_diff", 40)
     eq("…", line:sub(-#"…"))

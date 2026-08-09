@@ -10,6 +10,8 @@ local utils = require "octo.utils"
 local writers = require "octo.ui.writers"
 local config = require "octo.config"
 local html = require "octo.ui.html"
+local preview_cache = require "octo.pickers.fzf-lua.preview_cache"
+local preview_prefetch = require "octo.pickers.fzf-lua.preview_prefetch"
 
 local M = {}
 
@@ -60,9 +62,67 @@ function M.bufferPreviewer:update_border(title)
   self.win:update_preview_scrollbar()
 end
 
+---The GraphQL query that fetches everything a preview renders for one item.
+---@param kind string octo entry kind, "issue" or "pull_request"
+---@param owner string repository owner
+---@param name string repository name
+---@param number string|integer the issue or pull request number
+---@return string? query nil for a kind that has no preview query
+local function preview_query(kind, owner, name, number)
+  if kind == "issue" then
+    return graphql("issue_query", owner, name, number, _G.octo_pv2_fragment)
+  elseif kind == "pull_request" then
+    return graphql("pull_request_query", owner, name, number, _G.octo_pv2_fragment)
+  end
+end
+
+---Pull the issue or pull request node out of a decoded preview response.
+---@param kind string octo entry kind, "issue" or "pull_request"
+---@param output string raw JSON returned by `gh api graphql`
+---@return table? node nil when the response cannot be decoded or holds no node
+local function decode_preview(kind, output)
+  local ok, result = pcall(vim.json.decode, output)
+  if not ok or type(result) ~= "table" or not result.data or not result.data.repository then
+    return nil
+  end
+  if kind == "issue" then
+    return result.data.repository.issue
+  elseif kind == "pull_request" then
+    return result.data.repository.pullRequest
+  end
+end
+
+---Start one preview fetch. Writes nothing to any buffer or window: it decodes the
+---response and hands the payload to `done`, which is what makes a completion that
+---outlives its picker harmless.
+---@param kind string octo entry kind, "issue" or "pull_request"
+---@param repo string "owner/name" the item belongs to
+---@param number string|integer the issue or pull request number
+---@param done fun(payload: table?) called with the decoded node, or nil on failure
+local function fetch_preview(kind, repo, number, done)
+  local owner, name = utils.split_repo(repo)
+  local query = preview_query(kind, owner, name, number)
+  if not query then
+    done(nil)
+    return
+  end
+  gh.api.graphql {
+    f = { query = query },
+    opts = {
+      cb = function(output, stderr)
+        if stderr and not utils.is_blank(stderr) then
+          done(nil)
+        else
+          done(decode_preview(kind, output))
+        end
+      end,
+    },
+  }
+end
+
 ---A shallow copy of a payload whose body has had its inline HTML rewritten as
----markdown. The response itself is never mutated, so the transform is derived per
----paint and can never compound.
+---markdown. The cached payload itself is never touched, so what the cache holds
+---stays the raw response and the transform is derived per paint.
 ---@param obj table decoded issue or pull request node
 ---@return table obj to hand to the writers
 local function with_rendered_body(obj)
@@ -72,7 +132,29 @@ local function with_rendered_body(obj)
   return vim.tbl_extend("keep", { body = html.to_markdown(obj.body) }, obj)
 end
 
-function M.issue(formatted_issues)
+---Paint a fetched preview payload into a buffer.
+---@param bufnr integer buffer to write into, already validated by the caller
+---@param kind string octo entry kind, "issue" or "pull_request"
+---@param number string|integer the issue or pull request number, used for the state line
+---@param obj table decoded issue or pull request node
+local function render_preview(bufnr, kind, number, obj)
+  local state = utils.get_displayed_state(kind == "issue", obj.state, obj.stateReason)
+
+  writers.write_title(bufnr, obj.title, 1)
+  writers.write_details(bufnr, obj, false, true)
+  writers.write_body(bufnr, with_rendered_body(obj))
+  writers.write_state(bufnr, state:upper(), number)
+  local reactions_line = vim.api.nvim_buf_line_count(bufnr) - 1
+  writers.write_block(bufnr, { "", "" }, reactions_line)
+  writers.write_reactions(bufnr, obj.reactionGroups, reactions_line)
+  vim.bo[bufnr].filetype = "octo"
+end
+
+---Previewer for a list of issues or pull requests.
+---@param formatted_issues table<string, table> entry keyed by its entry string
+---@param order? string[] entry strings in list order; enables prefetching ahead of the cursor
+---@return octo.fzf-lua.Previewer
+function M.issue(formatted_issues, order)
   ---@type octo.fzf-lua.Previewer
   local previewer = M.bufferPreviewer:extend()
   previewer.octo_wrap = M.wrap_prose()
@@ -84,50 +166,64 @@ function M.issue(formatted_issues)
     return self
   end
 
+  local cache = preview_cache.new()
+  local positions ---@type table<string, integer>?
+  local previous_position ---@type integer?
+
+  ---Warm the cache for the entries just beyond the cursor, in its direction of
+  ---travel. Warming writes only to the cache, never to a buffer or a window.
+  ---@param entry_str string the entry now under the cursor
+  local function warm_neighbours(entry_str)
+    local window = preview_prefetch.window()
+    if window == 0 or not order or #order == 0 then
+      return
+    end
+    if not positions or vim.tbl_count(positions) ~= #order then
+      positions = preview_prefetch.positions_of(order)
+    end
+    local from = positions[entry_str]
+    if not from then
+      return
+    end
+    for _, target in ipairs(preview_prefetch.targets(order, from, previous_position, window)) do
+      local neighbour = formatted_issues[target]
+      if neighbour then
+        local key = preview_cache.key(neighbour.kind, neighbour.repo, neighbour.value)
+        cache:request(key, function(done)
+          fetch_preview(neighbour.kind, neighbour.repo, neighbour.value, done)
+        end)
+      end
+    end
+    previous_position = from
+  end
+
+  function previewer:close(do_not_clear_cache)
+    cache:abandon()
+    return previewer.super.close(self, do_not_clear_cache)
+  end
+
   function previewer:populate_preview_buf(entry_str)
     local tmpbuf = self:get_tmp_buffer()
     local entry = formatted_issues[entry_str]
+    local key = preview_cache.key(entry.kind, entry.repo, entry.value)
+    self.octo_preview_key = key
 
-    local number = entry.value
-    local owner, name = utils.split_repo(entry.repo)
-    local query
-    if entry.kind == "issue" then
-      query = graphql("issue_query", owner, name, number, _G.octo_pv2_fragment)
-    elseif entry.kind == "pull_request" then
-      query = graphql("pull_request_query", owner, name, number, _G.octo_pv2_fragment)
+    local cached = cache:get(key)
+    if cached then
+      render_preview(tmpbuf, entry.kind, entry.value, cached)
+    else
+      cache:request(key, function(done)
+        fetch_preview(entry.kind, entry.repo, entry.value, done)
+      end, function(payload)
+        if self.octo_preview_key == key and self.preview_bufnr == tmpbuf and vim.api.nvim_buf_is_valid(tmpbuf) then
+          render_preview(tmpbuf, entry.kind, entry.value, payload)
+        end
+      end)
     end
-    gh.api.graphql {
-      f = { query = query },
-      opts = {
-        cb = gh.create_callback {
-          success = function(output)
-            if self.preview_bufnr == tmpbuf and vim.api.nvim_buf_is_valid(tmpbuf) then
-              local result = vim.json.decode(output)
-              local obj
-              if entry.kind == "issue" then
-                obj = result.data.repository.issue
-              elseif entry.kind == "pull_request" then
-                obj = result.data.repository.pullRequest
-              end
-
-              local state = utils.get_displayed_state(entry.kind == "issue", obj.state, obj.stateReason)
-
-              writers.write_title(tmpbuf, obj.title, 1)
-              writers.write_details(tmpbuf, obj, false, true) -- include_status = true for preview
-              writers.write_body(tmpbuf, with_rendered_body(obj))
-              writers.write_state(tmpbuf, state:upper(), number)
-              local reactions_line = vim.api.nvim_buf_line_count(tmpbuf) - 1
-              writers.write_block(tmpbuf, { "", "" }, reactions_line)
-              writers.write_reactions(tmpbuf, obj.reactionGroups, reactions_line)
-              vim.bo[tmpbuf].filetype = "octo"
-            end
-          end,
-        },
-      },
-    }
 
     self:set_preview_buf(tmpbuf)
     self:update_border(entry.ordinal)
+    warm_neighbours(entry_str)
   end
 
   return previewer
@@ -145,6 +241,13 @@ function M.search()
     return self
   end
 
+  local cache = preview_cache.new()
+
+  function previewer:close(do_not_clear_cache)
+    cache:abandon()
+    return previewer.super.close(self, do_not_clear_cache)
+  end
+
   function previewer:populate_preview_buf(entry_str)
     local tmpbuf = self:get_tmp_buffer()
     local match = string.gmatch(entry_str, "[^%s]+")
@@ -152,45 +255,24 @@ function M.search()
     local owner = match()
     local name = match()
     local number = tonumber(match())
+    local repo = string.format("%s/%s", owner, name)
+    local key = preview_cache.key(kind, repo, number)
+    self.octo_preview_key = key
 
-    local query ---@type string
-    if kind == "issue" then
-      query = graphql("issue_query", owner, name, number, _G.octo_pv2_fragment)
-    elseif kind == "pull_request" then
-      query = graphql("pull_request_query", owner, name, number, _G.octo_pv2_fragment)
+    local cached = cache:get(key)
+    if cached then
+      render_preview(tmpbuf, kind, number, cached)
+    else
+      cache:request(key, function(done)
+        fetch_preview(kind, repo, number, done)
+      end, function(payload)
+        if self.octo_preview_key == key and self.preview_bufnr == tmpbuf and vim.api.nvim_buf_is_valid(tmpbuf) then
+          render_preview(tmpbuf, kind, number, payload)
+        end
+      end)
     end
-    gh.api.graphql {
-      f = { query = query },
-      opts = {
-        cb = gh.create_callback {
-          success = function(output)
-            if self.preview_bufnr == tmpbuf and vim.api.nvim_buf_is_valid(tmpbuf) then
-              local result = vim.json.decode(output)
-              local obj
-              if kind == "issue" then
-                obj = result.data.repository.issue
-              elseif kind == "pull_request" then
-                obj = result.data.repository.pullRequest
-              end
-
-              local state = utils.get_displayed_state(kind == "issue", obj.state, obj.stateReason)
-
-              writers.write_title(tmpbuf, obj.title, 1)
-              writers.write_details(tmpbuf, obj, false, true) -- include_status = true for preview
-              writers.write_body(tmpbuf, with_rendered_body(obj))
-              writers.write_state(tmpbuf, state:upper(), number)
-              local reactions_line = vim.api.nvim_buf_line_count(tmpbuf) - 1
-              writers.write_block(tmpbuf, { "", "" }, reactions_line)
-              writers.write_reactions(tmpbuf, obj.reactionGroups, reactions_line)
-              vim.bo[tmpbuf].filetype = "octo"
-            end
-          end,
-        },
-      },
-    }
 
     self:set_preview_buf(tmpbuf)
-    -- self:update_border(number.." "..description)
     self.win:update_preview_scrollbar()
   end
 

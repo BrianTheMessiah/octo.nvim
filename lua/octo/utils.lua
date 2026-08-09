@@ -1927,6 +1927,7 @@ function M.apply_mappings(kind, bufnr)
       vim.keymap.set(mode, value.lhs, mappings[action], mapping_opts)
     end
   end
+  require("octo.reviews.help-bar").remember(bufnr, kind)
 end
 
 ---Returns the starting and ending lines to be commented based on the calling context.

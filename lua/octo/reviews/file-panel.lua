@@ -113,6 +113,8 @@ function FilePanel:open()
     vim.api.nvim_set_option_value(k, v, { win = self.winid, scope = "local" })
   end
 
+  require("octo.reviews.help-bar").attach(self.winid)
+
   vim.cmd ":wincmd ="
 end
 

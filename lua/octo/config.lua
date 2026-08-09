@@ -18,6 +18,7 @@ local M = {}
 ---@field merge_pr OctoPickerMapping
 ---@field filter_mine OctoPickerMapping
 ---@field filter_all OctoPickerMapping
+---@field filter_repo OctoPickerMapping
 
 -- Type for a single action definition within the array
 ---@class OctoSnacksActionItem
@@ -198,6 +199,7 @@ function M.get_default_values()
         merge_pr = { lhs = "<C-r>", desc = "merge pull request" },
         filter_mine = { lhs = "<A-m>", desc = "narrow to pull requests you opened" },
         filter_all = { lhs = "<A-a>", desc = "widen to all open pull requests" },
+        filter_repo = { lhs = "<A-r>", desc = "narrow the loaded pull requests to one repository" },
       },
       snacks = { -- snacks specific config
         -- Initialize actions as empty arrays

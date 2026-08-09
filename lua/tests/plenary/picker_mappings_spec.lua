@@ -63,6 +63,24 @@ describe("picker mappings against the keys already taken:", function()
     end
   end)
 
+  it("lets the pull request picker add its four keys without displacing an open action", function()
+    local shared = fzf_actions.common_open_actions {}
+    local keys = mapping_keys()
+
+    local own = {}
+    for _, name in ipairs { "checkout_pr", "filter_mine", "filter_all", "filter_repo" } do
+      local key = keys[name]
+      assert.is_not_nil(key, ("picker_config.mappings.%s is gone, so the picker cannot bind it"):format(name))
+      assert.is_nil(
+        shared[key],
+        ("picker_config.mappings.%s takes %q, which every list already binds"):format(name, key)
+      )
+      own[key] = name
+    end
+
+    eq(4, vim.tbl_count(own))
+  end)
+
   it("shadows exactly the three fzf-lua default binds it has always shadowed", function()
     local reserved = {}
     for key in pairs(fzf_defaults.defaults.keymap.fzf) do

@@ -8,6 +8,7 @@ local graphql = require "octo.gh.graphql"
 local octo_config = require "octo.config"
 local picker_utils = require "octo.pickers.fzf-lua.pickers.utils"
 local previewers = require "octo.pickers.fzf-lua.previewers"
+local repo_scope = require "octo.pickers.fzf-lua.pickers.repo_scope"
 local utils = require "octo.utils"
 
 local M = {}
@@ -167,6 +168,9 @@ function M.picker(opts)
         vim.schedule(function()
           M.picker(next_opts)
         end)
+      end,
+      [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_repo.lhs)] = function()
+        utils.info(repo_scope.pinned_message(repo, cfg.picker_config.mappings.filter_repo.lhs))
       end,
       [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_all.lhs)] = function()
         local next_opts = vim.tbl_extend("force", opts, {

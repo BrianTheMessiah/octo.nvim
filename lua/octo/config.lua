@@ -51,6 +51,11 @@ local M = {}
 ---@field preview_wrap boolean -- Soft-wrap prose previews (issue/PR bodies) in the fzf-lua preview window
 ---@field preview_prefetch integer -- How many entries beyond the cursor to fetch previews for ahead of time (0 disables)
 ---@field preview_render_html boolean -- Rewrite the inline HTML in an issue or PR body as markdown in previews
+---@field preview_render_markdown boolean -- Render the markdown in a preview body rather than showing its source
+---@field preview_prefetch_all boolean -- Fetch a preview for every entry in a loaded list, not just around the cursor
+---@field preview_prefetch_concurrency integer -- How many preview fetches may run at once
+---@field preview_rate_limit_reserve integer -- GraphQL rate limit points to leave unspent by prefetching
+---@field preview_loading boolean -- Show a progress strip while a picker's previews are being warmed
 
 ---@class OctoConfigColors
 ---@field white string
@@ -197,6 +202,11 @@ function M.get_default_values()
       preview_wrap = true, -- soft-wrap prose previews (issue/PR bodies) in the fzf-lua preview window
       preview_prefetch = 5, -- how many entries beyond the cursor to fetch previews for ahead of time (0 disables)
       preview_render_html = true, -- rewrite the inline HTML in an issue or PR body as markdown in previews
+      preview_render_markdown = true, -- render the markdown in a preview body rather than showing its source
+      preview_prefetch_all = true, -- fetch a preview for every entry in a loaded list, not just around the cursor
+      preview_prefetch_concurrency = 6, -- how many preview fetches may run at once
+      preview_rate_limit_reserve = 500, -- GraphQL rate limit points to leave unspent by prefetching
+      preview_loading = true, -- show a progress strip while a picker's previews are being warmed
       mappings = { -- mappings for the pickers
         open_in_browser = { lhs = "<C-b>", desc = "open issue in browser" },
         copy_url = { lhs = "<C-y>", desc = "copy url to system clipboard" },
@@ -676,6 +686,15 @@ function M.validate_config()
     validate_type(config.picker_config.preview_wrap, "picker_config.preview_wrap", "boolean")
     validate_type(config.picker_config.preview_prefetch, "picker_config.preview_prefetch", "number")
     validate_type(config.picker_config.preview_render_html, "picker_config.preview_render_html", "boolean")
+    validate_type(config.picker_config.preview_render_markdown, "picker_config.preview_render_markdown", "boolean")
+    validate_type(config.picker_config.preview_prefetch_all, "picker_config.preview_prefetch_all", "boolean")
+    validate_type(
+      config.picker_config.preview_prefetch_concurrency,
+      "picker_config.preview_prefetch_concurrency",
+      "number"
+    )
+    validate_type(config.picker_config.preview_rate_limit_reserve, "picker_config.preview_rate_limit_reserve", "number")
+    validate_type(config.picker_config.preview_loading, "picker_config.preview_loading", "boolean")
     if validate_type(config.picker_config.mappings, "picker_config.mappings", "table") then
       ---Checks that no two picker mappings convert to the same fzf key.
       ---

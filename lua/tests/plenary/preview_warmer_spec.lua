@@ -243,6 +243,34 @@ describe("octo preview warmer:", function()
     eq({ 0, 0 }, { select(1, w:progress()), select(2, w:progress()) })
   end)
 
+  it("reports no progress once stopped, so a closed picker's display is left alone", function()
+    with_config("preview_prefetch_concurrency", 4, function()
+      local h = fetches()
+      local seen = {}
+      local list = {}
+      for i = 1, 10 do
+        list[i] = entry(i)
+      end
+      local w = warmer.new {
+        cache = preview_cache.new(),
+        entries = function()
+          return list
+        end,
+        fetch = h.fetch,
+        on_progress = function(completed, total)
+          table.insert(seen, { completed, total })
+        end,
+      }
+      w:warm()
+      h.answer { body = "x" }
+      eq(1, #seen)
+
+      w:stop()
+      h.drain { body = "x" }
+      eq(1, #seen)
+    end)
+  end)
+
   it("survives a stop while requests are still in flight", function()
     with_config("preview_prefetch_concurrency", 3, function()
       local h = fetches()

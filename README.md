@@ -200,6 +200,7 @@ require"octo".setup {
     preview_prefetch_all = true, -- fetch a preview for every entry in a loaded list, not just around the cursor
     preview_prefetch_concurrency = 6, -- how many preview fetches may run at once
     preview_rate_limit_reserve = 500, -- GraphQL rate limit points to leave unspent by prefetching
+    preview_loading = true, -- show a progress strip while a picker's previews are being warmed
     mappings = { -- mappings for the pickers
       open_in_browser = { lhs = "<C-b>", desc = "open issue in browser" },
       copy_url = { lhs = "<C-y>", desc = "copy url to system clipboard" },

@@ -92,11 +92,16 @@ function Throttle:is_finished()
 end
 
 ---Record one completion and report progress.
+---
+---A stopped throttle counts the completion but reports nothing. Requests cannot be
+---cancelled, so several are still in flight when a picker closes; a progress report
+---from one of those would drive a display whose picker no longer exists, which is how
+---a closed picker left its loading strip on screen.
 ---@param self octo.PreviewThrottle
 local function complete(self)
   self.inflight = self.inflight - 1
   self.done = self.done + 1
-  if self.on_progress then
+  if self.on_progress and not self.stopped then
     self.on_progress(self.done, self.accepted)
   end
 end

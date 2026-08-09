@@ -10,6 +10,7 @@ local utils = require "octo.utils"
 local writers = require "octo.ui.writers"
 local config = require "octo.config"
 local html = require "octo.ui.html"
+local loading = require "octo.ui.loading"
 local preview_cache = require "octo.pickers.fzf-lua.preview_cache"
 local preview_markdown = require "octo.pickers.fzf-lua.preview_markdown"
 local preview_prefetch = require "octo.pickers.fzf-lua.preview_prefetch"
@@ -206,6 +207,9 @@ function M.issue(formatted_issues, order)
   local warmer = preview_warmer.new {
     cache = cache,
     fetch = fetch_entry,
+    on_progress = function(completed, total)
+      loading.update(completed, total)
+    end,
     entries = function()
       local loaded = {}
       for _, entry_str in ipairs(order or {}) do
@@ -250,6 +254,7 @@ function M.issue(formatted_issues, order)
 
   function previewer:close(do_not_clear_cache)
     warmer:stop()
+    loading.abandon()
     cache:abandon()
     return previewer.super.close(self, do_not_clear_cache)
   end
@@ -260,6 +265,7 @@ function M.issue(formatted_issues, order)
     local key = preview_cache.key(entry.kind, entry.repo, entry.value)
     self.octo_preview_key = key
     warmer:warm()
+    loading.update(warmer:progress())
 
     local cached = cache:get(key)
     if cached then
@@ -303,6 +309,9 @@ function M.search(formatted_items)
   local warmer = preview_warmer.new {
     cache = cache,
     fetch = fetch_entry,
+    on_progress = function(completed, total)
+      loading.update(completed, total)
+    end,
     entries = function()
       local loaded = {}
       for _, entry in pairs(formatted_items or {}) do
@@ -314,6 +323,7 @@ function M.search(formatted_items)
 
   function previewer:close(do_not_clear_cache)
     warmer:stop()
+    loading.abandon()
     cache:abandon()
     return previewer.super.close(self, do_not_clear_cache)
   end
@@ -329,6 +339,7 @@ function M.search(formatted_items)
     local key = preview_cache.key(kind, repo, number)
     self.octo_preview_key = key
     warmer:warm()
+    loading.update(warmer:progress())
 
     local cached = cache:get(key)
     if cached then

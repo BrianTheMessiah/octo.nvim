@@ -149,6 +149,28 @@ describe("octo preview throttle:", function()
     eq({ { 1, 3 }, { 2, 3 }, { 3, 3 } }, seen)
   end)
 
+  it("reports no progress for a completion that lands after it was stopped", function()
+    local seen = {}
+    local runner = throttle.new {
+      limit = 3,
+      on_progress = function(completed, total)
+        table.insert(seen, { completed, total })
+      end,
+    }
+    local h = harness()
+    for _ = 1, 6 do
+      runner:push(h.job)
+    end
+
+    h.finish()
+    eq({ { 1, 6 } }, seen)
+
+    runner:stop()
+    h.drain()
+    eq({ { 1, 6 } }, seen)
+    assert.is_true(runner:completed() > 1, "completions after a stop must still be counted")
+  end)
+
   it("starts nothing new once stopped, and leaves in-flight jobs harmless", function()
     local runner = throttle.new { limit = 2 }
     local h = harness()

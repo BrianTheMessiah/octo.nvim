@@ -336,6 +336,170 @@ query($endCursor: String) {
 }
 ]] .. fragments.issue .. fragments.pull_request .. fragments.reaction_groups .. fragments.label .. fragments.label_connection .. fragments.assignee_connection .. fragments.issue_timeline_items_connection .. fragments.issue_information .. fragments.get_issue_timeline_definitions()
 
+  -- The picker preview paints a title, a details block, a body and a reaction line,
+  -- and nothing else. `M.issue`/`M.pull_request` additionally carry the timeline, the
+  -- review threads and the changed files that a full buffer needs, which the preview
+  -- never reads: for one pull request that is 20380 nodes and 2 rate-limit points
+  -- against these queries' 170 nodes and 1 point. Prefetching a whole list makes that
+  -- difference the deciding cost, so the preview asks only for what it paints.
+  --
+  -- `rateLimit` rides along at no cost and is what lets a prefetch back off before it
+  -- exhausts the hourly budget.
+  --
+  -- Kept deliberately: `commits` is the flag `writers.write_details` switches on to
+  -- render a pull request rather than an issue, and `timelineItems` narrowed to
+  -- reviews is where the coloured reviewer dots come from.
+  M.pull_request_preview = [[
+query {
+  rateLimit { cost nodeCount remaining resetAt }
+  repository(owner: "%s", name: "%s") {
+    pullRequest(number: %d) {
+      isDraft
+      isInMergeQueue
+      state
+      title
+      body
+      createdAt
+      lastEditedAt
+      closedAt
+      updatedAt
+      url
+      additions
+      deletions
+      changedFiles
+      commits {
+        totalCount
+      }
+      headRefName
+      baseRefName
+      merged
+      mergedBy {
+        ... on Organization { name }
+        ... on Bot { login }
+        ... on User {
+          login
+          isViewer
+        }
+        ... on Mannequin { login }
+      }
+      milestone {
+        title
+        state
+        openIssueCount
+        closedIssueCount
+        progressPercentage
+      }
+      author {
+        login
+      }
+      authorAssociation
+      viewerDidAuthor
+      viewerSubscription
+      ...ReactionGroupsFragment
+      %s
+      timelineItems(last: 100, itemTypes: [PULL_REQUEST_REVIEW]) {
+        nodes {
+          __typename
+          ... on PullRequestReview {
+            author { login }
+            state
+          }
+        }
+      }
+      reviewDecision
+      labels(first: 20) {
+        ...LabelConnectionFragment
+      }
+      assignees(first: 20) {
+        ...AssigneeConnectionFragment
+      }
+      reviewRequests(first: 20) {
+        totalCount
+        nodes {
+          requestedReviewer {
+            ... on User {
+              login
+              isViewer
+            }
+            ... on Mannequin { login }
+            ... on Bot { login }
+            ... on Team { name }
+          }
+        }
+      }
+      closingIssuesReferences(first: 10) {
+        totalCount
+        nodes {
+          number
+          title
+          state
+          stateReason
+        }
+      }
+      statusCheckRollup {
+        state
+      }
+      mergeStateStatus
+      mergeable
+      autoMergeRequest {
+        enabledBy { login }
+        mergeMethod
+      }
+    }
+  }
+}
+]] .. fragments.reaction_groups .. fragments.label .. fragments.label_connection .. fragments.assignee_connection
+
+  M.issue_preview = [[
+query {
+  rateLimit { cost nodeCount remaining resetAt }
+  repository(owner: "%s", name: "%s") {
+    issue(number: %d) {
+      state
+      stateReason
+      title
+      body
+      createdAt
+      lastEditedAt
+      closedAt
+      updatedAt
+      url
+      issueType {
+        name
+        color
+      }
+      milestone {
+        title
+        state
+        openIssueCount
+        closedIssueCount
+        progressPercentage
+      }
+      author {
+        login
+      }
+      authorAssociation
+      viewerDidAuthor
+      viewerSubscription
+      ...ReactionGroupsFragment
+      %s
+      parent {
+        number
+        title
+        state
+        stateReason
+      }
+      labels(first: 20) {
+        ...LabelConnectionFragment
+      }
+      assignees(first: 20) {
+        ...AssigneeConnectionFragment
+      }
+    }
+  }
+}
+]] .. fragments.reaction_groups .. fragments.label .. fragments.label_connection .. fragments.assignee_connection
+
   ---@class octo.queries.IssueKind
   ---@field data {
   ---  repository: {

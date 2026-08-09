@@ -186,6 +186,23 @@ function M.prompt(title, repo)
   return repo
 end
 
+---What the narrowing key reports in a list that holds one repository and can hold
+---no other, because the repository was fixed before the list was asked for. It
+---names the repository, so the absence of anything to choose is accounted for,
+---and it names the search that spans repositories, so the key points somewhere
+---even where it cannot narrow.
+---@param repo string the `nameWithOwner` the list is confined to
+---@param lhs string the pressed key, written as a mapping writes it
+---@return string message the whole of what the press reports
+function M.pinned_message(repo, lhs)
+  local reason = ("%s is the only repository in this list, so %s has nothing to narrow."):format(repo, lhs)
+  local owner = repo:match "^([^/]+)/"
+  if not owner then
+    return reason
+  end
+  return ("%s For pull requests across repositories, run :Octo search is:pr is:open org:%s."):format(reason, owner)
+end
+
 ---Opens the second picker: the repositories present among the pull requests
 ---already loaded, with how many each holds. Choosing one calls back with its
 ---`nameWithOwner`; choosing the first row calls back with `M.ALL`.

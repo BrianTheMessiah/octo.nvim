@@ -33,6 +33,7 @@ return function(opts)
   local cb = utils.pop_key(opts, "cb")
 
   local formatted_issues = {} ---@type table<string, table> entry.ordinal -> entry
+  local issue_order = {} ---@type string[] entry.ordinal in list order
 
   local function get_contents(fzf_cb)
     gh.api.graphql {
@@ -59,6 +60,7 @@ return function(opts)
 
               if entry ~= nil then
                 formatted_issues[entry.ordinal] = entry
+                table.insert(issue_order, entry.ordinal)
                 local prefix = fzf.utils.ansi_from_hl("Comment", entry.value)
                 fzf_cb(prefix .. " " .. entry.obj.title)
               end
@@ -85,7 +87,7 @@ return function(opts)
 
   fzf.fzf_exec(get_contents, {
     prompt = picker_utils.get_prompt(prompt_title),
-    previewer = previewers.issue(formatted_issues),
+    previewer = previewers.issue(formatted_issues, issue_order),
     fzf_opts = {
       ["--no-multi"] = "", -- TODO this can support multi, maybe.
       ["--header"] = opts.results_title,

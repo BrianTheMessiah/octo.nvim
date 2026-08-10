@@ -58,6 +58,65 @@ function M.build_query(opts, owner, name)
   return queries.search, { prompt = table.concat(parts, " "), type = "ISSUE" }, ".data.search.nodes"
 end
 
+---The fzf options every PR list carries.
+---
+---Pulled out of `M.picker` so a test can see the exact header the picker hands
+---`fzf.fzf_exec`, rather than the shared builder in isolation.
+---@return table fzf_opts the options to hand fzf
+function M.fzf_opts()
+  return {
+    ["--no-multi"] = "", -- TODO this can support multi, maybe.
+    ["--info"] = "default",
+    ["--header"] = picker_utils.help_header(),
+  }
+end
+
+---The actions the PR list carries: octo's usual open, browse and copy keys, this
+---task's own help key, and the checkout/filter keys the PR list adds on top.
+---
+---Pulled out of `M.picker` so a test can see the exact actions table the picker
+---hands `fzf.fzf_exec`, rather than asserting against a rebuilt copy.
+---@param opts table the picker's options, as `M.picker` received them
+---@param formatted_pulls table<string, table> entry.ordinal -> entry
+---@param repo string the repository the list is scoped to
+---@param requested_repo string|nil the repo the picker was originally opened with
+---@param requested_prompt_title string|nil the prompt title the picker was originally opened with
+---@return table<string, function> actions keyed by fzf key
+function M.list_actions(opts, formatted_pulls, repo, requested_repo, requested_prompt_title)
+  local cfg = octo_config.values
+  return vim.tbl_extend("force", fzf_actions.common_open_actions(formatted_pulls), fzf_actions.help_action(), {
+    [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.checkout_pr.lhs)] = function(selected)
+      local entry = formatted_pulls[selected[1]]
+      checkout_pull_request(entry)
+    end,
+    [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_mine.lhs)] = function()
+      local next_opts = vim.tbl_extend("force", opts, {
+        repo = requested_repo,
+        prompt_title = requested_prompt_title,
+        author = "@me",
+        window_title = "My Pull Requests",
+      })
+      vim.schedule(function()
+        M.picker(next_opts)
+      end)
+    end,
+    [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_repo.lhs)] = function()
+      utils.info(repo_scope.pinned_message(repo, cfg.picker_config.mappings.filter_repo.lhs))
+    end,
+    [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_all.lhs)] = function()
+      local next_opts = vim.tbl_extend("force", opts, {
+        repo = requested_repo,
+        prompt_title = requested_prompt_title,
+        window_title = "Pull Requests",
+      })
+      next_opts.author = nil
+      vim.schedule(function()
+        M.picker(next_opts)
+      end)
+    end,
+  })
+end
+
 ---Opens the fzf-lua PR picker.
 ---@param opts? table `repo`, `window_title`, `prompt_title`, `author`, `states`,
 ---  `BaseRefName`, `HeadRefName`, `labels`, `cb`
@@ -85,7 +144,6 @@ function M.picker(opts)
   end
 
   local owner, name = utils.split_repo(repo)
-  local cfg = octo_config.values
 
   local window_title = utils.pop_key(opts, "window_title") or "Pull Requests"
   local prompt_title = utils.pop_key(opts, "prompt_title")
@@ -145,46 +203,12 @@ function M.picker(opts)
   fzf.fzf_exec(get_contents, {
     prompt = picker_utils.get_prompt(prompt_title),
     previewer = previewers.issue(formatted_pulls, pull_order),
-    fzf_opts = {
-      ["--no-multi"] = "", -- TODO this can support multi, maybe.
-      ["--info"] = "default",
-      ["--header"] = picker_utils.help_header(),
-    },
+    fzf_opts = M.fzf_opts(),
     winopts = {
       title = window_title,
       title_pos = "center",
     },
-    actions = vim.tbl_extend("force", fzf_actions.common_open_actions(formatted_pulls), fzf_actions.help_action(), {
-      [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.checkout_pr.lhs)] = function(selected)
-        local entry = formatted_pulls[selected[1]]
-        checkout_pull_request(entry)
-      end,
-      [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_mine.lhs)] = function()
-        local next_opts = vim.tbl_extend("force", opts, {
-          repo = requested_repo,
-          prompt_title = requested_prompt_title,
-          author = "@me",
-          window_title = "My Pull Requests",
-        })
-        vim.schedule(function()
-          M.picker(next_opts)
-        end)
-      end,
-      [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_repo.lhs)] = function()
-        utils.info(repo_scope.pinned_message(repo, cfg.picker_config.mappings.filter_repo.lhs))
-      end,
-      [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.filter_all.lhs)] = function()
-        local next_opts = vim.tbl_extend("force", opts, {
-          repo = requested_repo,
-          prompt_title = requested_prompt_title,
-          window_title = "Pull Requests",
-        })
-        next_opts.author = nil
-        vim.schedule(function()
-          M.picker(next_opts)
-        end)
-      end,
-    }),
+    actions = M.list_actions(opts, formatted_pulls, repo, requested_repo, requested_prompt_title),
   })
 end
 

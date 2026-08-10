@@ -1,6 +1,7 @@
 local BodyMetadata = require("octo.model.body-metadata").BodyMetadata
 local TitleMetadata = require("octo.model.title-metadata").TitleMetadata
 local autocmds = require "octo.autocmds"
+local buttons = require "octo.ui.buttons"
 local config = require "octo.config"
 local constants = require "octo.constants"
 local folds = require "octo.folds"
@@ -29,7 +30,7 @@ local M = {}
 ---@field commentsMetadata CommentMetadata[]
 ---@field threadsMetadata ThreadMetadata[]
 ---@field private node octo.PullRequest|octo.Issue|octo.Release|octo.Discussion|octo.Repository
----@field private markdown_timer? uv.uv_timer_t debounce timer driving render_markdown, reused across edits
+---@field private markdown_timer? uv.uv_timer_t debounce timer driving render_decorations, reused across edits
 ---@field taggable_users? string[] list of taggable users for the buffer. Trigger with @
 ---@field owner? string
 ---@field name? string
@@ -118,7 +119,7 @@ function OctoBuffer:render_repo()
   vim.bo[self.bufnr].modified = false
 
   self.ready = true
-  self:render_markdown()
+  self:render_decorations()
 end
 
 function OctoBuffer:render_release()
@@ -126,7 +127,7 @@ function OctoBuffer:render_release()
   writers.write_release(self.bufnr, self:release())
   vim.bo[self.bufnr].modified = false
   self.ready = true
-  self:render_markdown()
+  self:render_decorations()
 end
 
 function OctoBuffer:render_discussion()
@@ -173,7 +174,7 @@ function OctoBuffer:render_discussion()
   vim.bo[self.bufnr].filetype = "octo"
 
   self.ready = true
-  self:render_markdown()
+  self:render_decorations()
 end
 
 ---Writes an issue or pull request to the buffer.
@@ -211,7 +212,7 @@ function OctoBuffer:render_issue()
   vim.bo[self.bufnr].modified = false
 
   self.ready = true
-  self:render_markdown()
+  self:render_decorations()
 end
 
 ---Draws review threads
@@ -289,6 +290,10 @@ function OctoBuffer:configure()
 
   self:apply_mappings()
   keymap_help.attach(vim.api.nvim_get_current_win(), self.bufnr, self.kind)
+
+  vim.keymap.set("n", "<LeftRelease>", function()
+    require("octo.ui.buttons").click()
+  end, { buffer = self.bufnr, silent = true, desc = "Octo: press the button under the mouse" })
 end
 
 ---Accumulates all the taggable users into a single list that
@@ -1088,19 +1093,67 @@ function OctoBuffer:markdown_regions()
   return regions
 end
 
----Renders the markdown in this buffer's bodies and comments.
+---The sections a button row is drawn under.
 ---
----Safe to call on a buffer that is not ready: there are no regions yet, so it does
----nothing rather than half-rendering a buffer mid-paint. Also guards buffer
+---A body's row hangs under the body; each comment's under that comment. The footer's
+---hangs under the last line in the buffer, which is where a reader who has read to the
+---end is looking.
+---@return octo.ButtonSection[]
+function OctoBuffer:button_sections()
+  local sections = {}
+
+  ---@param metadata BodyMetadata|CommentMetadata|nil
+  ---@param kind string
+  local function add(metadata, kind)
+    if not metadata or not metadata.extmark then
+      return
+    end
+    local mark =
+      vim.api.nvim_buf_get_extmark_by_id(self.bufnr, constants.OCTO_COMMENT_NS, metadata.extmark, { details = true })
+    if vim.tbl_isempty(mark) then
+      return
+    end
+    -- get_extmark_region answers in 0-based rows (see markdown_regions above);
+    -- octo.ButtonSection.last_line is 1-based, so the end is shifted by one on the
+    -- way out, same as markdown_regions does for the same reason.
+    local _, last = utils.get_extmark_region(self.bufnr, mark)
+    if last then
+      sections[#sections + 1] = {
+        kind = kind,
+        last_line = last + 1,
+        caps = { viewer_can_update = metadata.viewerCanUpdate == true },
+      }
+    end
+  end
+
+  add(self.bodyMetadata, "body")
+  for _, metadata in ipairs(self.commentsMetadata or {}) do
+    add(metadata, self:isReviewThread() and "thread" or "comment")
+  end
+
+  sections[#sections + 1] = {
+    kind = "footer",
+    last_line = vim.api.nvim_buf_line_count(self.bufnr),
+    caps = {},
+  }
+
+  return sections
+end
+
+---Renders the markdown and the button rows in this buffer.
+---
+---Safe to call on a buffer that is not ready: there is nothing to decorate yet, so it
+---does nothing rather than half-drawing a buffer mid-paint. Also guards buffer
 ---validity directly: `markdown_regions()` is evaluated as an argument to
 ---`markdown.render_regions`, which runs it before that function ever gets to its
 ---own `nvim_buf_is_valid` check, so that check alone cannot protect a call made
 ---after the buffer is gone.
-function OctoBuffer:render_markdown()
+function OctoBuffer:render_decorations()
   if not self.ready or not vim.api.nvim_buf_is_valid(self.bufnr) then
     return
   end
   markdown.render_regions(self.bufnr, self:markdown_regions())
+  buttons.render(self.bufnr, self:button_sections())
 end
 
 ---Stops and releases this buffer's markdown debounce timer, if it has one.
@@ -1117,7 +1170,7 @@ function OctoBuffer:stop_markdown_timer()
   self.markdown_timer = nil
 end
 
----Restarts this buffer's debounce timer so `render_markdown` runs once typing
+---Restarts this buffer's debounce timer so `render_decorations` runs once typing
 ---pauses rather than on every keystroke.
 ---
 ---One timer is allocated per buffer and reused via stop()+start(), same as
@@ -1133,7 +1186,7 @@ function OctoBuffer:schedule_render_markdown()
     150,
     0,
     vim.schedule_wrap(function()
-      self:render_markdown()
+      self:render_decorations()
     end)
   )
 end

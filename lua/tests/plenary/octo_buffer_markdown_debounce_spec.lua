@@ -100,7 +100,7 @@ describe("OctoBuffer markdown debounce wiring:", function()
     eq(true, first_timer == second_timer)
   end)
 
-  it("render_markdown raises nothing when called against a buffer that is no longer valid", function()
+  it("render_decorations raises nothing when called against a buffer that is no longer valid", function()
     local buffer, bufnr = configured_buffer()
     -- markdown_regions() only ever touches the API if there is metadata to read;
     -- without a real extmark this test would pass vacuously, without exercising
@@ -112,14 +112,14 @@ describe("OctoBuffer markdown debounce wiring:", function()
     vim.api.nvim_buf_delete(bufnr, { force = true })
 
     -- Simulates a debounced callback that lands after teardown despite the
-    -- BufWipeout handler: render_markdown's own validity guard must still hold
+    -- BufWipeout handler: render_decorations' own validity guard must still hold
     -- even if `ready` were never reset (it evaluates markdown_regions() as an
     -- argument to markdown.render_regions, ahead of that function's own guard,
     -- so this check cannot be left to render_regions alone).
     buffer.ready = true
 
     local ok = pcall(function()
-      buffer:render_markdown()
+      buffer:render_decorations()
     end)
 
     eq(true, ok)
@@ -135,7 +135,7 @@ describe("OctoBuffer markdown debounce wiring:", function()
     vim.api.nvim_buf_delete(bufnr, { force = true })
 
     -- The BufWipeout handler stops the timer synchronously, so pumping the
-    -- event loop past the debounce delay must not run render_markdown again.
+    -- event loop past the debounce delay must not run render_decorations again.
     vim.wait(250, function()
       return false
     end)

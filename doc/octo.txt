@@ -495,6 +495,12 @@ ui~
             discussion is fetched. It reports only; the cursor and every
             key still go to the buffer underneath.
 
+        section_buttons                 boolean (default: true)
+            Draw a row of actions under each body, comment and thread.
+            The rows are virtual text, not buffer content, so they cannot
+            be edited or submitted. Each button carries the key that
+            fires it; the mouse works too.
+
 
 PR REVIEW                                       *octo-pr-review*
 

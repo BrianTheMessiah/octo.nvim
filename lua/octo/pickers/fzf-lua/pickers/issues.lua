@@ -10,7 +10,48 @@ local picker_utils = require "octo.pickers.fzf-lua.pickers.utils"
 local previewers = require "octo.pickers.fzf-lua.previewers"
 local utils = require "octo.utils"
 
-return function(opts)
+local M = {}
+
+---The fzf options every issue list carries.
+---
+---Pulled out of `M.picker` so a test can see the exact header the picker hands
+---`fzf.fzf_exec`, rather than the shared builder in isolation.
+---@return table fzf_opts the options to hand fzf
+function M.fzf_opts()
+  return {
+    ["--no-multi"] = "", -- TODO this can support multi, maybe.
+    ["--header"] = picker_utils.help_header(),
+    ["--info"] = "default",
+  }
+end
+
+---The actions the issue list carries.
+---
+---With a `cb`, the picker was opened to choose one issue for a caller (e.g. linking
+---a related issue), so `default` hands that issue straight to `cb` and none of the
+---usual open/browse/copy keys apply. Without one, the shared open/browse/copy keys
+---carry the list as normal. Either way this task's own help key is merged in last,
+---so both callers of this picker keep a working keymap float.
+---
+---Pulled out of `M.picker` so a test can see the exact actions table the picker
+---hands `fzf.fzf_exec`, rather than asserting against a rebuilt copy.
+---@param formatted_issues table<string, table> entry.ordinal -> entry
+---@param cb fun(entry: table)|nil the callback that receives the chosen entry, if any
+---@return table<string, function> actions keyed by fzf key
+function M.list_actions(formatted_issues, cb)
+  if cb then
+    return vim.tbl_extend("force", {
+      ["default"] = function(selected)
+        cb(formatted_issues[selected[1]])
+      end,
+    }, fzf_actions.help_action())
+  end
+  return vim.tbl_extend("force", fzf_actions.common_open_actions(formatted_issues), fzf_actions.help_action())
+end
+
+---Opens the fzf-lua issue picker.
+---@param opts? table `repo`, `window_title`, `prompt_title`, `states`, `cb`
+function M.picker(opts)
   opts = opts or {}
   if not opts.states then
     opts.states = { "OPEN" }
@@ -74,29 +115,22 @@ return function(opts)
     }
   end
 
-  local actions
-  if cb then
-    actions = {
-      ["default"] = function(selected)
-        cb(formatted_issues[selected[1]])
-      end,
-    }
-  else
-    actions = fzf_actions.common_open_actions(formatted_issues)
-  end
-
   fzf.fzf_exec(get_contents, {
     prompt = picker_utils.get_prompt(prompt_title),
     previewer = previewers.issue(formatted_issues, issue_order),
-    fzf_opts = {
-      ["--no-multi"] = "", -- TODO this can support multi, maybe.
-      ["--header"] = opts.results_title,
-      ["--info"] = "default",
-    },
+    fzf_opts = M.fzf_opts(),
     winopts = {
       title = window_title,
       title_pos = "center",
     },
-    actions = actions,
+    actions = M.list_actions(formatted_issues, cb),
   })
 end
+
+setmetatable(M, {
+  __call = function(_, opts)
+    return M.picker(opts)
+  end,
+})
+
+return M

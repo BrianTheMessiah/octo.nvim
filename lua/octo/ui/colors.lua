@@ -158,6 +158,8 @@ function M.setup()
       vim.api.nvim_set_hl(0, "Octo" .. from, { link = to })
     end
   end
+
+  vim.api.nvim_set_hl(0, "OctoButton", { link = "DiffAdd", default = true })
 end
 
 local HIGHLIGHT_NAME_PREFIX = "octo"

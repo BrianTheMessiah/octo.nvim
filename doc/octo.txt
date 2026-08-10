@@ -483,6 +483,24 @@ CONFIGURATION                                   *octo-config*
 See the README (<https://github.com/pwntester/octo.nvim>) for an example
 configuration in Lua. Open with `:Octo repo view pwntester/octo.nvim`
 
+ui~
+
+        render_markdown                 boolean (default: true)
+            Render the markdown in bodies and comments rather than showing
+            its source. The line the cursor is on always shows its source,
+            so text stays editable.
+
+        pr_loading                      boolean (default: true)
+            Show a loading float while a picked issue, pull request or
+            discussion is fetched. It reports only; the cursor and every
+            key still go to the buffer underneath.
+
+        section_buttons                 boolean (default: true)
+            Draw a row of actions under each body, comment and thread.
+            The rows are virtual text, not buffer content, so they cannot
+            be edited or submitted. Each button carries the key that
+            fires it; the mouse works too.
+
 
 PR REVIEW                                       *octo-pr-review*
 

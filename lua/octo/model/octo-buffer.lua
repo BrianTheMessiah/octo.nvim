@@ -1,12 +1,15 @@
 local BodyMetadata = require("octo.model.body-metadata").BodyMetadata
 local TitleMetadata = require("octo.model.title-metadata").TitleMetadata
 local autocmds = require "octo.autocmds"
+local buttons = require "octo.ui.buttons"
 local config = require "octo.config"
 local constants = require "octo.constants"
 local folds = require "octo.folds"
 local gh = require "octo.gh"
 local headers = require "octo.gh.headers"
 local graphql = require "octo.gh.graphql"
+local keymap_help = require "octo.ui.keymap-help"
+local markdown = require "octo.ui.markdown"
 local mutations = require "octo.gh.mutations"
 local signs = require "octo.ui.signs"
 local writers = require "octo.ui.writers"
@@ -27,6 +30,7 @@ local M = {}
 ---@field commentsMetadata CommentMetadata[]
 ---@field threadsMetadata ThreadMetadata[]
 ---@field private node octo.PullRequest|octo.Issue|octo.Release|octo.Discussion|octo.Repository
+---@field private markdown_timer? uv.uv_timer_t debounce timer driving render_decorations, reused across edits
 ---@field taggable_users? string[] list of taggable users for the buffer. Trigger with @
 ---@field owner? string
 ---@field name? string
@@ -115,6 +119,7 @@ function OctoBuffer:render_repo()
   vim.bo[self.bufnr].modified = false
 
   self.ready = true
+  self:render_decorations()
 end
 
 function OctoBuffer:render_release()
@@ -122,6 +127,7 @@ function OctoBuffer:render_release()
   writers.write_release(self.bufnr, self:release())
   vim.bo[self.bufnr].modified = false
   self.ready = true
+  self:render_decorations()
 end
 
 function OctoBuffer:render_discussion()
@@ -168,6 +174,7 @@ function OctoBuffer:render_discussion()
   vim.bo[self.bufnr].filetype = "octo"
 
   self.ready = true
+  self:render_decorations()
 end
 
 ---Writes an issue or pull request to the buffer.
@@ -205,6 +212,7 @@ function OctoBuffer:render_issue()
   vim.bo[self.bufnr].modified = false
 
   self.ready = true
+  self:render_decorations()
 end
 
 ---Draws review threads
@@ -214,6 +222,7 @@ function OctoBuffer:render_threads(threads)
   writers.write_threads(self.bufnr, threads)
   vim.bo[self.bufnr].modified = false
   self.ready = true
+  self:render_decorations()
 end
 
 ---Configures the buffer
@@ -239,7 +248,54 @@ function OctoBuffer:configure()
     end
   end)
 
+  -- Conceal extmarks shift with edits on their own, so this is only ever about
+  -- markdown the reader has just *typed*: a `**` that has no span yet. Debounced,
+  -- because it runs a treesitter-free line scan over every body and comment and
+  -- TextChangedI fires on every keystroke.
+  --
+  -- configure() is not a once-per-buffer-lifetime call: BufEnter re-runs it on the
+  -- same already-existing OctoBuffer every time its window is re-entered. Without
+  -- an idempotency guard, each re-entry would register another independent
+  -- autocmd (and each edit would then fire all of them). A buffer-scoped augroup
+  -- cleared right before creation keeps exactly one debounce autocmd alive no
+  -- matter how many times configure() runs. The timer it drives is likewise kept
+  -- on `self` and reused rather than allocated per keystroke -- see
+  -- schedule_render_markdown/stop_markdown_timer below, which mirror
+  -- comment-popup.lua's schedule_persist/stop_timer.
+  local group = vim.api.nvim_create_augroup(string.format("octo_markdown_debounce_%d", self.bufnr), { clear = true })
+
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+    group = group,
+    buffer = self.bufnr,
+    desc = "Octo: keep the rendered markdown current as the buffer is edited",
+    callback = function()
+      self:schedule_render_markdown()
+    end,
+  })
+
+  -- Without this, editing the buffer and closing it inside the debounce window
+  -- leaves the scheduled callback to fire against a dead buffer. `once = true`
+  -- is enough on its own here (unlike the autocmd above, this one only ever
+  -- needs to fire once per buffer lifetime), but it still goes through the same
+  -- augroup so a re-configured buffer never ends up with two of these either.
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+    group = group,
+    buffer = self.bufnr,
+    once = true,
+    desc = "Octo: stop the markdown debounce timer when its buffer goes away",
+    callback = function()
+      self.ready = false
+      self:stop_markdown_timer()
+      buttons.teardown(self.bufnr)
+    end,
+  })
+
   self:apply_mappings()
+  keymap_help.attach(vim.api.nvim_get_current_win(), self.bufnr, self.kind)
+
+  vim.keymap.set("n", "<LeftRelease>", function()
+    require("octo.ui.buttons").click()
+  end, { buffer = self.bufnr, silent = true, desc = "Octo: press the button under the mouse" })
 end
 
 ---Accumulates all the taggable users into a single list that
@@ -998,6 +1054,158 @@ function OctoBuffer:update_metadata()
     metadata.endLine = end_line
     metadata.dirty = utils.trim(metadata.body) ~= utils.trim(metadata.savedBody) and true or false
   end
+end
+
+---The body and comment extents markdown may be rendered over.
+---
+---Read straight off each metadata's extmark rather than from `startLine`/`endLine`,
+---which `update_metadata` only fills in for issues, pull requests and discussions --
+---a release's body is written through the same `write_body_agnostic` and has an
+---extmark just the same. Reading the mark keeps this kind-agnostic and free of any
+---ordering dependency on `update_metadata` having run first.
+---
+---`utils.get_extmark_region` answers in 0-based rows (it feeds `nvim_buf_get_lines`
+---directly); `octo.MarkdownRegion` is 1-based inclusive, so each end is shifted by one
+---on the way out.
+---@return octo.MarkdownRegion[] regions in buffer order, 1-based inclusive
+function OctoBuffer:markdown_regions()
+  local regions = {}
+
+  ---@param metadata BodyMetadata|CommentMetadata|nil
+  local function add(metadata)
+    if not metadata or not metadata.extmark then
+      return
+    end
+    local mark =
+      vim.api.nvim_buf_get_extmark_by_id(self.bufnr, constants.OCTO_COMMENT_NS, metadata.extmark, { details = true })
+    if vim.tbl_isempty(mark) then
+      return
+    end
+    local first, last = utils.get_extmark_region(self.bufnr, mark)
+    if first and last and last >= first then
+      regions[#regions + 1] = { first_line = first + 1, last_line = last + 1 }
+    end
+  end
+
+  add(self.bodyMetadata)
+  for _, metadata in ipairs(self.commentsMetadata or {}) do
+    add(metadata)
+  end
+
+  return regions
+end
+
+---The sections a button row is drawn under.
+---
+---A body's row hangs under the body; each comment's under that comment. The footer's
+---hangs under the last line in the buffer, which is where a reader who has read to the
+---end is looking.
+---@return octo.ButtonSection[]
+function OctoBuffer:button_sections()
+  local sections = {}
+
+  ---@param metadata BodyMetadata|CommentMetadata|nil
+  ---@param kind string
+  local function add(metadata, kind)
+    if not metadata or not metadata.extmark then
+      return
+    end
+    local mark =
+      vim.api.nvim_buf_get_extmark_by_id(self.bufnr, constants.OCTO_COMMENT_NS, metadata.extmark, { details = true })
+    if vim.tbl_isempty(mark) then
+      return
+    end
+    -- get_extmark_region answers in 0-based rows (see markdown_regions above);
+    -- octo.ButtonSection.last_line is 1-based, so the end is shifted by one on the
+    -- way out, same as markdown_regions does for the same reason.
+    local _, last = utils.get_extmark_region(self.bufnr, mark)
+    if last then
+      local last_line = last + 1
+      local caps = { viewer_can_update = metadata.viewerCanUpdate == true }
+      if kind == "thread" then
+        -- A thread's resolved state lives on the thread, not the comment:
+        -- commentsMetadata flattens every comment of every thread into one list,
+        -- so a comment section cannot answer "is my thread resolved" on its own.
+        -- get_thread_at_line is the same lookup get_thread_at_cursor already uses
+        -- to answer "which thread owns this position" for resolve_thread and
+        -- unresolve_thread, so this reuses it rather than inventing a second way
+        -- to make the same comment-to-thread association.
+        local thread = self:get_thread_at_line(last_line)
+        if thread then
+          caps.is_resolved = thread.isResolved == true
+        end
+      end
+      sections[#sections + 1] = {
+        kind = kind,
+        last_line = last_line,
+        caps = caps,
+      }
+    end
+  end
+
+  add(self.bodyMetadata, "body")
+  for _, metadata in ipairs(self.commentsMetadata or {}) do
+    add(metadata, self:isReviewThread() and "thread" or "comment")
+  end
+
+  sections[#sections + 1] = {
+    kind = "footer",
+    last_line = vim.api.nvim_buf_line_count(self.bufnr),
+    caps = {},
+  }
+
+  return sections
+end
+
+---Renders the markdown and the button rows in this buffer.
+---
+---Safe to call on a buffer that is not ready: there is nothing to decorate yet, so it
+---does nothing rather than half-drawing a buffer mid-paint. Also guards buffer
+---validity directly: `markdown_regions()` is evaluated as an argument to
+---`markdown.render_regions`, which runs it before that function ever gets to its
+---own `nvim_buf_is_valid` check, so that check alone cannot protect a call made
+---after the buffer is gone.
+function OctoBuffer:render_decorations()
+  if not self.ready or not vim.api.nvim_buf_is_valid(self.bufnr) then
+    return
+  end
+  markdown.render_regions(self.bufnr, self:markdown_regions())
+  buttons.render(self.bufnr, self:button_sections())
+end
+
+---Stops and releases this buffer's markdown debounce timer, if it has one.
+---@return nil
+function OctoBuffer:stop_markdown_timer()
+  local timer = self.markdown_timer
+  if not timer then
+    return
+  end
+  timer:stop()
+  if not timer:is_closing() then
+    timer:close()
+  end
+  self.markdown_timer = nil
+end
+
+---Restarts this buffer's debounce timer so `render_decorations` runs once typing
+---pauses rather than on every keystroke.
+---
+---One timer is allocated per buffer and reused via stop()+start(), same as
+---comment-popup.lua's schedule_persist: a timer that runs to completion and is
+---just dropped is never closed, which leaks the underlying uv handle.
+---@return nil
+function OctoBuffer:schedule_render_markdown()
+  if not self.markdown_timer then
+    self.markdown_timer = assert(vim.uv.new_timer())
+  end
+  self.markdown_timer:stop()
+  self.markdown_timer:start(
+    150,
+    0,
+    vim.schedule_wrap(function()
+      self:render_decorations()
+    end)
+  )
 end
 
 ---Renders the signs in the signcolumn or statuscolumn

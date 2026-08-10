@@ -9,6 +9,7 @@ local gh = require "octo.gh"
 local queries = require "octo.gh.queries"
 local graphql = require "octo.gh.graphql"
 local picker = require "octo.picker"
+local pr_loading = require "octo.ui.pr-loading"
 local reviews = require "octo.reviews"
 local signs = require "octo.ui.signs"
 local window = require "octo.ui.window"
@@ -133,7 +134,11 @@ function M.load_buffer(opts)
       or current.hostname ~= hostname
   end
 
+  pr_loading.show(repo, kind, id)
+
   M.load(repo, kind, id, hostname, function(obj)
+    pr_loading.hide()
+
     if is_stale_target() then
       return
     end
@@ -221,6 +226,7 @@ function M.load(repo, kind, id, hostname, cb)
       local obj = resp.data.repository.release
       cb(obj)
     else
+      pr_loading.hide()
       utils.error("Unknown kind: " .. kind)
     end
   end
@@ -232,7 +238,13 @@ function M.load(repo, kind, id, hostname, cb)
     jq = ".",
     hostname = hostname,
     opts = {
-      cb = gh.create_callback { failure = utils.print_err, success = load_buffer },
+      cb = gh.create_callback {
+        failure = function(stderr)
+          pr_loading.hide()
+          utils.print_err(stderr)
+        end,
+        success = load_buffer,
+      },
     },
   }
 end

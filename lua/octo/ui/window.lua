@@ -12,6 +12,7 @@ local M = {}
 ---@field y_offset integer
 ---@field x_offset integer
 ---@field enter? boolean
+---@field footer? string
 
 ---@param opts octo.BorderHeaderFloatOpts
 function M.create_floating_window(opts)
@@ -25,6 +26,8 @@ function M.create_floating_window(opts)
   winid = vim.api.nvim_open_win(bufnr, opts.enter or false, {
     relative = "editor",
     title = opts.header,
+    footer = opts.footer,
+    footer_pos = opts.footer and "left" or nil,
     border = border,
     row = opts.y_offset,
     col = opts.x_offset,
@@ -47,6 +50,7 @@ end
 ---@field header? string
 ---@field content? string[]
 ---@field enter? boolean
+---@field footer? string
 
 ---@param opts? octo.CenteredFloatOpts
 ---@return integer winid
@@ -109,6 +113,7 @@ function M.create_centered_float(opts)
     y_offset = y_offset,
     x_offset = x_offset,
     enter = opts.enter,
+    footer = opts.footer,
   }
 
   -- mappings

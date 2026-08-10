@@ -1,11 +1,19 @@
 local drafts = require "octo.drafts"
 local utils = require "octo.utils"
 local window = require "octo.ui.window"
+local keymap_help = require "octo.ui.keymap-help"
 
 local M = {}
 
 ---The line separating read-only context from the editable compose region.
 M.COMPOSE_MARK = "───────────────────────── your comment ─────────────────────────"
+
+---What the popup's bottom border says.
+---
+---The three keys a compose window actually needs, then the help section. It is a
+---constant rather than built per popup because every popup has exactly these keys:
+---they are bound here, not read from the mapping config.
+M.FOOTER = (" <C-s> send  q close  %s "):format(keymap_help.section())
 
 ---Per-buffer state for open popups, keyed by bufnr.
 ---@type table<integer, table>
@@ -234,6 +242,7 @@ function M.open(opts)
   local winid, bufnr = window.create_centered_float {
     header = opts.title or "Comment",
     content = content,
+    footer = M.FOOTER,
     enter = true,
   }
 
@@ -290,6 +299,10 @@ function M.open(opts)
   vim.keymap.set("n", "<C-c>", function()
     M.cancel(bufnr)
   end, vim.tbl_extend("force", map_opts, { desc = "Octo: close, keeping a draft" }))
+
+  vim.keymap.set("n", keymap_help.HELP_KEY, function()
+    keymap_help.float "comment_popup"
+  end, vim.tbl_extend("force", map_opts, { desc = "Octo: show the keys this popup has" }))
 
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
     buffer = bufnr,

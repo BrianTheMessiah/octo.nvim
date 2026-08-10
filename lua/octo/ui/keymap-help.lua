@@ -168,6 +168,21 @@ M.LABELS = {
   discussion = "discussion",
   repo = "repo",
   release = "release",
+  comment_popup = "comment",
+}
+
+---The keys a surface binds in code rather than reading from the mapping config.
+---
+---A comment popup binds its own keys in `octo.ui.comment-popup`, so there is no
+---`config.values.mappings` table to build entries from and the float would otherwise
+---have nothing to show.
+M.LITERAL = {
+  comment_popup = {
+    { action = "submit", lhs = "<C-s>", label = "send this comment" },
+    { action = "submit_leader", lhs = "<leader>op", label = "send this comment" },
+    { action = "cancel", lhs = "q", label = "close, keeping a draft" },
+    { action = "cancel_ctrl", lhs = "<C-c>", label = "close, keeping a draft" },
+  },
 }
 
 ---The keys one kind has, in the order they are drawn.
@@ -175,6 +190,17 @@ M.LABELS = {
 ---@param handlers table<string, function>|nil the action handlers; octo's own when omitted
 ---@return { action: string, lhs: string, label: string }[]
 function M.entries(kind, handlers)
+  if M.LITERAL[kind] then
+    local entries = {}
+    for _, entry in ipairs(M.LITERAL[kind]) do
+      entries[#entries + 1] = {
+        action = entry.action,
+        lhs = M.pretty_lhs(entry.lhs),
+        label = entry.label,
+      }
+    end
+    return entries
+  end
   handlers = handlers or require "octo.mappings"
   return M.entries_from(config.values.mappings[kind] or {}, M.ORDER[kind] or {}, handlers)
 end

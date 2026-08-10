@@ -12,7 +12,7 @@
 
 - Worktree: `/home/brianthemessiah/src/octo.nvim-prui`, branch `feat/pr-buffer-ui`, off `master` (23328a9). Run every command from that directory.
 - Test dependencies are siblings of the worktree: `../plenary.nvim` (symlinked to `~/.local/share/nvim/lazy/plenary.nvim`) and `../fzf-lua`. Both already exist.
-- Run one spec: `nvim --headless --noplugin -u lua/tests/minimal_init.vim -c "PlenaryBustedFile lua/tests/plenary/<name>_spec.lua"`
+- Run one spec: `nvim --headless --noplugin -u lua/tests/minimal_init.vim -c "PlenaryBustedDirectory lua/tests/plenary/<name>_spec.lua {minimal_init = 'lua/tests/minimal_init.vim'}"`. Not `PlenaryBustedFile`: it spawns its own child nvim and passes it no `-u`, so `minimal_init` reaches only the parent and the spec runs without `require("octo")` having set `_G.octo_buffers`. Specs that build an `OctoBuffer` then fail with `attempt to index global 'octo_buffers'` under `PlenaryBustedFile` while passing in the suite.
 - Run the suite: `nvim --headless --noplugin -u lua/tests/minimal_init.vim -c "PlenaryBustedDirectory lua/tests/plenary/ {minimal_init = 'lua/tests/minimal_init.vim'}"`
 - Typecheck: `make check`. Format: `make format`.
 - Specs open with `---@diagnostic disable` and `local eq = assert.are.same`, matching `lua/tests/plenary/review_help_bar_spec.lua`.

@@ -169,6 +169,7 @@ M.LABELS = {
   repo = "repo",
   release = "release",
   comment_popup = "comment",
+  picker = "picker",
 }
 
 ---The keys a surface binds in code rather than reading from the mapping config.
@@ -199,6 +200,22 @@ function M.entries(kind, handlers)
         label = entry.label,
       }
     end
+    return entries
+  end
+  if kind == "picker" then
+    local entries = {}
+    for action, mapping in pairs(config.values.picker_config.mappings or {}) do
+      if not utils.is_blank(mapping) and not utils.is_blank(mapping.lhs) then
+        entries[#entries + 1] = {
+          action = action,
+          lhs = M.pretty_lhs(mapping.lhs),
+          label = mapping.desc or M.terse(action),
+        }
+      end
+    end
+    table.sort(entries, function(a, b)
+      return a.action < b.action
+    end)
     return entries
   end
   handlers = handlers or require "octo.mappings"

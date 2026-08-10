@@ -76,13 +76,13 @@ return function(opts)
 
   local actions
   if cb then
-    actions = {
+    actions = vim.tbl_extend("force", {
       ["default"] = function(selected)
         cb(formatted_issues[selected[1]])
       end,
-    }
+    }, fzf_actions.help_action())
   else
-    actions = fzf_actions.common_open_actions(formatted_issues)
+    actions = vim.tbl_extend("force", fzf_actions.common_open_actions(formatted_issues), fzf_actions.help_action())
   end
 
   fzf.fzf_exec(get_contents, {
@@ -90,7 +90,7 @@ return function(opts)
     previewer = previewers.issue(formatted_issues, issue_order),
     fzf_opts = {
       ["--no-multi"] = "", -- TODO this can support multi, maybe.
-      ["--header"] = opts.results_title,
+      ["--header"] = picker_utils.help_header(),
       ["--info"] = "default",
     },
     winopts = {

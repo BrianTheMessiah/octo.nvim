@@ -148,12 +148,13 @@ function M.picker(opts)
     fzf_opts = {
       ["--no-multi"] = "", -- TODO this can support multi, maybe.
       ["--info"] = "default",
+      ["--header"] = picker_utils.help_header(),
     },
     winopts = {
       title = window_title,
       title_pos = "center",
     },
-    actions = vim.tbl_extend("force", fzf_actions.common_open_actions(formatted_pulls), {
+    actions = vim.tbl_extend("force", fzf_actions.common_open_actions(formatted_pulls), fzf_actions.help_action(), {
       [utils.convert_vim_mapping_to_fzf(cfg.picker_config.mappings.checkout_pr.lhs)] = function(selected)
         local entry = formatted_pulls[selected[1]]
         checkout_pull_request(entry)

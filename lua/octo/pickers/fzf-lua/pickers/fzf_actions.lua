@@ -1,6 +1,7 @@
 local picker_utils = require "octo.pickers.fzf-lua.pickers.utils"
 local octo_config = require "octo.config"
 local utils = require "octo.utils"
+local keymap_help = require "octo.ui.keymap-help"
 local M = {}
 
 ---@param formatted_items table<string, table> entry.ordinal -> entry
@@ -34,6 +35,21 @@ function M.common_open_actions(formatted_items)
       picker_utils.copy_url(formatted_items[selected[1]])
     end,
   })
+end
+
+---The one action every octo picker adds: open the list of keys it has.
+---
+---Scheduled, because fzf-lua is still tearing its own window down when the action
+---runs and a float opened inside that teardown is closed with it.
+---@return table<string, function>
+function M.help_action()
+  return {
+    [utils.convert_vim_mapping_to_fzf(keymap_help.PICKER_HELP_KEY)] = function()
+      vim.schedule(function()
+        keymap_help.float "picker"
+      end)
+    end,
+  }
 end
 
 return M

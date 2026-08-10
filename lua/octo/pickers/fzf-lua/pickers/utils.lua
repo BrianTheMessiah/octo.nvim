@@ -2,6 +2,7 @@
 local navigation = require "octo.navigation"
 local utils = require "octo.utils"
 local fzf_utils = require "fzf-lua.utils"
+local keymap_help = require "octo.ui.keymap-help"
 
 local M = {}
 
@@ -99,6 +100,19 @@ end
 function M.pad_string(s, length)
   local string_s = tostring(s)
   return string.format("%s%" .. (length - #string_s) .. "s", string_s, " ")
+end
+
+---The `--header` line every octo picker carries.
+---
+---The keymap section sits in a section of its own, set off by a bar, so it reads as
+---being about the list rather than as one more key in it.
+---@return string
+function M.help_header()
+  return ("%s %s %s keys"):format(
+    vim.fn.nr2char(0x2502),
+    keymap_help.SYMBOL,
+    require("octo.utils").convert_vim_mapping_to_fzf(keymap_help.PICKER_HELP_KEY)
+  )
 end
 
 return M

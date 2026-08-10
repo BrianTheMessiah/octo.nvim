@@ -73,6 +73,19 @@ describe("octo.ui.buttons rows:", function()
     end
   end)
 
+  it("labels a button chunk with the shared button highlight group", function()
+    local chunks = buttons.line(buttons.rows("comment", {}))
+
+    -- Odd chunks are the leading separators (highlighted "Normal"); even chunks
+    -- are the buttons themselves, and must carry the real, specific group Task
+    -- 10 draws with -- not just some string.
+    for index, chunk in ipairs(chunks) do
+      if index % 2 == 0 then
+        eq("OctoButton", chunk[2])
+      end
+    end
+  end)
+
   it("draws nothing for a section with no buttons", function()
     eq({}, buttons.line {})
   end)

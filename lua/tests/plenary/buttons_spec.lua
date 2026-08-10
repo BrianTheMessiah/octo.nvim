@@ -113,6 +113,24 @@ describe("octo.ui.buttons drawing:", function()
     eq(1, #marks)
     eq(0, marks[1][2])
     eq(true, marks[1][4].virt_lines ~= nil)
+    -- The test's own name claims "below": assert the direction, not just that some
+    -- virt_lines mark exists. virt_lines_above = true would draw it above the
+    -- section instead and nothing else here would notice.
+    eq(false, marks[1][4].virt_lines_above)
+  end)
+
+  it("clears already-drawn rows when the option is switched off before the next repaint", function()
+    local bufnr, wipe = scratch { "a comment" }
+    buttons.render(bufnr, { { kind = "comment", last_line = 1, caps = {} } })
+
+    local original = config.values.ui.section_buttons
+    config.values.ui.section_buttons = false
+    buttons.render(bufnr, { { kind = "comment", last_line = 1, caps = {} } })
+    local count = #vim.api.nvim_buf_get_extmarks(bufnr, buttons.namespace(), 0, -1, {})
+
+    config.values.ui.section_buttons = original
+    wipe()
+    eq(0, count)
   end)
 
   it("clears its previous rows so a repainted buffer does not accumulate them", function()
@@ -193,6 +211,139 @@ describe("octo.ui.buttons hit testing:", function()
 
   it("finds nothing in an empty row", function()
     eq(nil, buttons.hit({}, 3, {}))
+  end)
+end)
+
+describe("octo.ui.buttons click handling:", function()
+  ---A real floating window over a scratch buffer, so `screenpos`/`getwininfo` answer
+  ---for real geometry rather than a guess. `click()` reads window/screen state that
+  ---only exists once a buffer is actually displayed, so `M.hit` alone (columns and
+  ---chunks, no window) cannot cover the glue in `M.click` that turns a mouse event
+  ---into those same columns and chunks.
+  ---@param lines string[]
+  ---@param width integer
+  ---@param winopts? table<string, any>
+  ---@return integer bufnr
+  ---@return integer win
+  ---@return fun() close
+  local function window(lines, width, winopts)
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    local win = vim.api.nvim_open_win(bufnr, false, {
+      relative = "editor",
+      width = width,
+      height = 10,
+      row = 0,
+      col = 0,
+    })
+    for opt, value in pairs(winopts or {}) do
+      vim.wo[win][opt] = value
+    end
+    return bufnr, win, function()
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+      end
+    end
+  end
+
+  ---Makes `win` current (a real mouse click always switches window/buffer before its
+  ---mapping fires, which is what lets click()'s buffer-local mapping run at all), then
+  ---calls fn with `vim.fn.getmousepos` replaced by `pos`. Always restores both.
+  ---@param win integer
+  ---@param pos table
+  ---@param fn fun()
+  local function click_at(win, pos, fn)
+    local original_win = vim.api.nvim_get_current_win()
+    local original_getmousepos = vim.fn.getmousepos
+    vim.api.nvim_set_current_win(win)
+    vim.fn.getmousepos = function()
+      return pos
+    end
+    local ok, err = pcall(fn)
+    vim.fn.getmousepos = original_getmousepos
+    if vim.api.nvim_win_is_valid(original_win) then
+      vim.api.nvim_set_current_win(original_win)
+    end
+    if not ok then
+      error(err, 0)
+    end
+  end
+
+  ---Runs fn with a mappings action replaced by a counting spy, then restores it.
+  ---@param action string
+  ---@param fn fun(calls: fun(): integer)
+  local function with_spy(action, fn)
+    local mappings = require "octo.mappings"
+    local original = mappings[action]
+    local count = 0
+    mappings[action] = function()
+      count = count + 1
+    end
+    local ok, err = pcall(fn, function()
+      return count
+    end)
+    mappings[action] = original
+    if not ok then
+      error(err, 0)
+    end
+  end
+
+  it("accounts for the window's gutter when measuring the click's display column", function()
+    -- signcolumn = "yes:9" is deliberately wide: row[1] ("Reply") spans several
+    -- columns on its own (see "finds the button a column falls inside" above), so a
+    -- gutter error that is smaller than one button's width would still land inside
+    -- the same button by accident and this test would pass whether or not the fix
+    -- was there at all. A gutter this wide instead overshoots row[1] into row[2]
+    -- ("React") once uncorrected, which fires the wrong action and leaves this
+    -- test's spy on row[1] uncalled -- that is what actually distinguishes the fix
+    -- from its absence.
+    local bufnr, win, close = window({ "a comment" }, 60, { signcolumn = "yes:9" })
+    buttons.render(bufnr, { { kind = "comment", last_line = 1, caps = {} } })
+    local row = buttons.rows("comment", {})
+    local textoff = vim.fn.getwininfo(win)[1].textoff
+    -- The whole test is moot if this window granted no gutter to correct for.
+    assert.is_true(textoff > 0)
+
+    with_spy(row[1].action, function(calls)
+      local anchor_row = vim.fn.screenpos(win, 1, 1).row
+      -- Column 3 (see "finds the button a column falls inside" above) lands inside
+      -- row[1]; a real click there reports wincol as textoff plus that column, 1-based.
+      click_at(win, { winid = win, line = 1, screenrow = anchor_row + 1, wincol = textoff + 4 }, function()
+        buttons.click()
+      end)
+      eq(1, calls())
+    end)
+
+    close()
+  end)
+
+  it("rejects a click on a wrapped anchor line's own continuation row", function()
+    local bufnr, win, close = window({ string.rep("x", 40) }, 10, { wrap = true })
+    buttons.render(bufnr, { { kind = "comment", last_line = 1, caps = {} } })
+    local row = buttons.rows("comment", {})
+
+    vim.api.nvim_set_current_win(win)
+    local first_row = vim.fn.screenpos(win, 1, 1).row
+    local last_row = vim.fn.screenpos(win, 1, vim.fn.col { 1, "$" }).row
+    -- The whole test is moot if a 40-char line in a 10-column window didn't wrap.
+    assert.is_true(last_row > first_row)
+
+    with_spy(row[1].action, function(calls)
+      click_at(win, { winid = win, line = 1, screenrow = first_row + 1, wincol = 4 }, function()
+        buttons.click()
+      end)
+      eq(0, calls())
+
+      click_at(win, { winid = win, line = 1, screenrow = last_row + 1, wincol = 4 }, function()
+        buttons.click()
+      end)
+      eq(1, calls())
+    end)
+
+    close()
   end)
 end)
 
@@ -343,5 +494,46 @@ describe("OctoBuffer button sections and decorations:", function()
 
     wipe()
     eq(true, found)
+  end)
+
+  it("draws the button row on a review thread buffer's first paint, not only after an edit", function()
+    -- render_threads is the one render_* method that never called render_markdown
+    -- (now render_decorations) before this fix; a thread buffer showed no button row
+    -- until the user typed and the 150ms debounce fired. threads = {} is enough to
+    -- prove the wiring: a footer section is unconditional, so a footer row appearing
+    -- proves render_decorations ran, without needing full review-thread comment
+    -- fixtures.
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    local buffer = OctoBuffer:new {
+      bufnr = bufnr,
+      repo = "owner/name",
+      commentsMetadata = {},
+      threadsMetadata = {},
+    }
+
+    buffer:render_threads {}
+    local button_marks = vim.api.nvim_buf_get_extmarks(bufnr, buttons.namespace(), 0, -1, {})
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    eq("reviewthread", buffer.kind)
+    eq(true, buffer.ready)
+    eq(true, #button_marks > 0)
+  end)
+
+  it("tells buttons.teardown the buffer is gone, so its drawn rows cannot leak or be clicked past it", function()
+    local buffer, bufnr, wipe = issue_buffer(true)
+    buffer:configure()
+
+    local original_teardown = buttons.teardown
+    local received
+    buttons.teardown = function(n)
+      received = n
+    end
+
+    local ok = pcall(wipe)
+    buttons.teardown = original_teardown
+
+    eq(true, ok)
+    eq(bufnr, received)
   end)
 end)

@@ -222,6 +222,7 @@ function OctoBuffer:render_threads(threads)
   writers.write_threads(self.bufnr, threads)
   vim.bo[self.bufnr].modified = false
   self.ready = true
+  self:render_decorations()
 end
 
 ---Configures the buffer
@@ -285,6 +286,7 @@ function OctoBuffer:configure()
     callback = function()
       self.ready = false
       self:stop_markdown_timer()
+      buttons.teardown(self.bufnr)
     end,
   })
 

@@ -183,15 +183,25 @@ end
 local drawn = {}
 
 ---Draw a button row under each section.
+---
+---Always clears first, even when buttons are off: a runtime flip of `ui.section_buttons`
+---to false must not leave the previous paint's rows on screen and still clickable
+---through a stale `drawn[bufnr]` entry -- it has to erase what an earlier, enabled
+---render put there.
 ---@param bufnr integer the octo buffer
 ---@param sections octo.ButtonSection[] the sections to draw under
 ---@return boolean drawn false when buttons are off or the buffer is gone
 function M.render(bufnr, sections)
-  if not M.enabled() or not vim.api.nvim_buf_is_valid(bufnr) then
+  if not vim.api.nvim_buf_is_valid(bufnr) then
     return false
   end
 
-  vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+  pcall(vim.api.nvim_buf_clear_namespace, bufnr, namespace, 0, -1)
+  drawn[bufnr] = nil
+
+  if not M.enabled() then
+    return false
+  end
   drawn[bufnr] = {}
 
   local total = vim.api.nvim_buf_line_count(bufnr)
@@ -213,6 +223,17 @@ function M.render(bufnr, sections)
   end
 
   return true
+end
+
+---Forgets a buffer's drawn rows once it is gone.
+---
+---`drawn` is keyed by bufnr for the lifetime of the process, not the buffer; without
+---this a wiped-out buffer's chunk/row tables would never be released, and a stale
+---entry would let `click()` resolve a mouse event against a buffer number Neovim has
+---already recycled for something else.
+---@param bufnr integer
+function M.teardown(bufnr)
+  drawn[bufnr] = nil
 end
 
 ---The button a display column falls inside.
@@ -244,8 +265,15 @@ end
 ---Fire the button under the mouse.
 ---
 ---A `virt_lines` row has no buffer position of its own, so the row is found by
----subtracting the anchor line's screen row from the click's: `getmousepos` reports the
----nearest real line, which for a click on a virtual line is the line it hangs from.
+---comparing screen rows: `getmousepos` reports the nearest real line, which for a
+---click on a virtual line is the line it hangs from. The anchor line can itself wrap
+---(octo buffers set `wrap`, and anchors are the last lines of prose bodies and
+---comments, which routinely do), so the comparison is against its *last* screen row,
+---not its first -- otherwise a plain click on the anchor's own second-or-later
+---wrapped row would be mistaken for a click below it and fire a button that was never
+---clicked. `pos.wincol` counts from the window's left edge, including the sign and
+---status columns, so it is corrected by the window's `textoff` before being measured
+---as a display column into the virtual line's chunks.
 function M.click()
   local pos = vim.fn.getmousepos()
   local win, bufnr = pos.winid, vim.api.nvim_win_get_buf(pos.winid)
@@ -260,12 +288,14 @@ function M.click()
     return
   end
 
-  local anchor_screen = vim.fn.screenpos(win, pos.line, 1)
-  if anchor_screen.row == 0 or pos.screenrow <= anchor_screen.row then
+  local anchor_end = vim.fn.screenpos(win, pos.line, vim.fn.col { pos.line, "$" })
+  if anchor_end.row == 0 or pos.screenrow <= anchor_end.row then
     return
   end
 
-  local target = M.hit(entry.chunks, pos.wincol - 1, entry.row)
+  local wininfo = vim.fn.getwininfo(win)[1]
+  local textoff = wininfo and wininfo.textoff or 0
+  local target = M.hit(entry.chunks, pos.wincol - 1 - textoff, entry.row)
   if not target then
     return
   end

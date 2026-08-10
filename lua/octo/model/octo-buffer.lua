@@ -29,6 +29,7 @@ local M = {}
 ---@field commentsMetadata CommentMetadata[]
 ---@field threadsMetadata ThreadMetadata[]
 ---@field private node octo.PullRequest|octo.Issue|octo.Release|octo.Discussion|octo.Repository
+---@field private markdown_timer? uv.uv_timer_t debounce timer driving render_markdown, reused across edits
 ---@field taggable_users? string[] list of taggable users for the buffer. Trigger with @
 ---@field owner? string
 ---@field name? string
@@ -249,26 +250,40 @@ function OctoBuffer:configure()
   -- markdown the reader has just *typed*: a `**` that has no span yet. Debounced,
   -- because it runs a treesitter-free line scan over every body and comment and
   -- TextChangedI fires on every keystroke.
-  local pending ---@type uv.uv_timer_t?
+  --
+  -- configure() is not a once-per-buffer-lifetime call: BufEnter re-runs it on the
+  -- same already-existing OctoBuffer every time its window is re-entered. Without
+  -- an idempotency guard, each re-entry would register another independent
+  -- autocmd (and each edit would then fire all of them). A buffer-scoped augroup
+  -- cleared right before creation keeps exactly one debounce autocmd alive no
+  -- matter how many times configure() runs. The timer it drives is likewise kept
+  -- on `self` and reused rather than allocated per keystroke -- see
+  -- schedule_render_markdown/stop_markdown_timer below, which mirror
+  -- comment-popup.lua's schedule_persist/stop_timer.
+  local group = vim.api.nvim_create_augroup(string.format("octo_markdown_debounce_%d", self.bufnr), { clear = true })
+
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+    group = group,
     buffer = self.bufnr,
     desc = "Octo: keep the rendered markdown current as the buffer is edited",
     callback = function()
-      if pending then
-        pending:stop()
-        if not pending:is_closing() then
-          pending:close()
-        end
-      end
-      pending = assert(vim.uv.new_timer())
-      pending:start(
-        150,
-        0,
-        vim.schedule_wrap(function()
-          pending = nil
-          self:render_markdown()
-        end)
-      )
+      self:schedule_render_markdown()
+    end,
+  })
+
+  -- Without this, editing the buffer and closing it inside the debounce window
+  -- leaves the scheduled callback to fire against a dead buffer. `once = true`
+  -- is enough on its own here (unlike the autocmd above, this one only ever
+  -- needs to fire once per buffer lifetime), but it still goes through the same
+  -- augroup so a re-configured buffer never ends up with two of these either.
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+    group = group,
+    buffer = self.bufnr,
+    once = true,
+    desc = "Octo: stop the markdown debounce timer when its buffer goes away",
+    callback = function()
+      self.ready = false
+      self:stop_markdown_timer()
     end,
   })
 
@@ -1076,12 +1091,51 @@ end
 ---Renders the markdown in this buffer's bodies and comments.
 ---
 ---Safe to call on a buffer that is not ready: there are no regions yet, so it does
----nothing rather than half-rendering a buffer mid-paint.
+---nothing rather than half-rendering a buffer mid-paint. Also guards buffer
+---validity directly: `markdown_regions()` is evaluated as an argument to
+---`markdown.render_regions`, which runs it before that function ever gets to its
+---own `nvim_buf_is_valid` check, so that check alone cannot protect a call made
+---after the buffer is gone.
 function OctoBuffer:render_markdown()
-  if not self.ready then
+  if not self.ready or not vim.api.nvim_buf_is_valid(self.bufnr) then
     return
   end
   markdown.render_regions(self.bufnr, self:markdown_regions())
+end
+
+---Stops and releases this buffer's markdown debounce timer, if it has one.
+---@return nil
+function OctoBuffer:stop_markdown_timer()
+  local timer = self.markdown_timer
+  if not timer then
+    return
+  end
+  timer:stop()
+  if not timer:is_closing() then
+    timer:close()
+  end
+  self.markdown_timer = nil
+end
+
+---Restarts this buffer's debounce timer so `render_markdown` runs once typing
+---pauses rather than on every keystroke.
+---
+---One timer is allocated per buffer and reused via stop()+start(), same as
+---comment-popup.lua's schedule_persist: a timer that runs to completion and is
+---just dropped is never closed, which leaks the underlying uv handle.
+---@return nil
+function OctoBuffer:schedule_render_markdown()
+  if not self.markdown_timer then
+    self.markdown_timer = assert(vim.uv.new_timer())
+  end
+  self.markdown_timer:stop()
+  self.markdown_timer:start(
+    150,
+    0,
+    vim.schedule_wrap(function()
+      self:render_markdown()
+    end)
+  )
 end
 
 ---Renders the signs in the signcolumn or statuscolumn

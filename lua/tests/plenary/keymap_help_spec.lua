@@ -173,4 +173,24 @@ describe("octo.ui.keymap-help float:", function()
     vim.api.nvim_buf_delete(bufnr, { force = true })
     eq("", bar)
   end)
+
+  -- A buffer's kind is not the key its mappings sit under: OctoBuffer.kind is "pull"
+  -- and the config block is `mappings.pull_request`, the same translation
+  -- OctoBuffer:apply_mappings makes. Read the kind straight and a pull request buffer
+  -- -- the one this whole surface was built for -- reports no keys at all.
+  it("finds the keys of every buffer kind the bar is scoped to, pull request included", function()
+    for _, kind in ipairs { "pull", "issue", "discussion", "repo", "release" } do
+      assert.is_true(#keymap_help.entries(kind) > 0, ("no keys found for kind %q"):format(kind))
+    end
+  end)
+
+  it("names a real pull request key on the bar rather than reporting none", function()
+    local entries = keymap_help.entries "pull"
+    local actions = vim.tbl_map(function(entry)
+      return entry.action
+    end, entries)
+
+    eq(true, vim.tbl_contains(actions, "checkout_pr"))
+    eq(false, keymap_help.bar_line("pull", 200):find "no keys mapped" ~= nil)
+  end)
 end)

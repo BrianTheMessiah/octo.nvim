@@ -172,6 +172,17 @@ M.LABELS = {
   picker = "picker",
 }
 
+---The `config.values.mappings` key a buffer kind's keys actually sit under.
+---
+---`OctoBuffer.kind` is not that key: a pull request buffer's kind is `pull` and its
+---mappings are `mappings.pull_request`. `OctoBuffer:apply_mappings` makes the same
+---translation to bind them; read the kind straight instead and the bar reports no keys
+---for the one buffer this surface was built for. Kinds absent here are their own key.
+M.CONFIG_KEY = {
+  pull = "pull_request",
+  reviewthread = "review_thread",
+}
+
 ---The keys a surface binds in code rather than reading from the mapping config.
 ---
 ---A comment popup binds its own keys in `octo.ui.comment-popup`, so there is no
@@ -219,7 +230,8 @@ function M.entries(kind, handlers)
     return entries
   end
   handlers = handlers or require "octo.mappings"
-  return M.entries_from(config.values.mappings[kind] or {}, M.ORDER[kind] or {}, handlers)
+  local mappings = config.values.mappings[M.CONFIG_KEY[kind] or kind] or {}
+  return M.entries_from(mappings, M.ORDER[kind] or {}, handlers)
 end
 
 ---The float's content: every key a kind has, one to a line.

@@ -231,6 +231,12 @@ function OctoBuffer:configure()
   vim.api.nvim_buf_call(self.bufnr, function()
     vim.cmd [[setlocal filetype=octo]]
     vim.cmd [[setlocal buftype=acwrite]]
+    -- An `acwrite` buffer is modified by its own render and can never be written
+    -- to a path, so its swap file is never recoverable work -- it only outlives an
+    -- unclean exit to raise E325 the next time that URL is opened, which happens on
+    -- every session restore that saved one. The review file panel and the debug
+    -- buffer already refuse one.
+    vim.cmd [[setlocal noswapfile]]
     vim.cmd [[setlocal omnifunc=v:lua.octo_omnifunc]]
     vim.wo[0][0].conceallevel = config.values.ui.conceallevel
     vim.cmd [[setlocal nonumber norelativenumber nocursorline wrap]]

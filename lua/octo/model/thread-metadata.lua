@@ -7,6 +7,7 @@ local M = {}
 ---@field reviewId string
 ---@field path string
 ---@field line number
+---@field isResolved? boolean whether the thread is resolved, per GitHub's own ReviewThreadInformationFragment.isResolved
 ---@field bufferStartLine? integer
 ---@field bufferEndLine? integer
 local ThreadMetadata = {}
@@ -23,6 +24,7 @@ function ThreadMetadata:new(opts)
     reviewId = opts.reviewId,
     path = opts.path,
     line = opts.line,
+    isResolved = opts.isResolved,
   }
   setmetatable(this, self)
   return this

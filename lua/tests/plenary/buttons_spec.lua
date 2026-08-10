@@ -537,3 +537,110 @@ describe("OctoBuffer button sections and decorations:", function()
     eq(bufnr, received)
   end)
 end)
+
+describe("OctoBuffer review thread resolved state:", function()
+  local OctoBuffer = require("octo.model.octo-buffer").OctoBuffer
+
+  ---A minimal but real octo.ReviewThread, just complete enough for
+  ---writers.write_threads to run its actual code path without erroring.
+  ---diffHunk = "" short-circuits write_thread_snippet immediately (it returns
+  ---without doing anything for a blank hunk), which sidesteps needing a real diff.
+  ---@param is_resolved boolean
+  ---@return table
+  local function review_thread(is_resolved)
+    return {
+      id = "thread-1",
+      path = "lua/example.lua",
+      diffSide = "RIGHT",
+      isOutdated = false,
+      isResolved = is_resolved,
+      isCollapsed = false,
+      resolvedBy = nil,
+      originalStartLine = vim.NIL,
+      originalLine = 10,
+      comments = {
+        nodes = {
+          {
+            id = "comment-1",
+            databaseId = 1,
+            url = "https://example.com/comment/1",
+            replyTo = nil,
+            state = "SUBMITTED",
+            body = "a thread comment",
+            createdAt = "2024-01-01T00:00:00Z",
+            lastEditedAt = vim.NIL,
+            includesCreatedEdit = vim.NIL,
+            viewerCanUpdate = true,
+            viewerCanDelete = true,
+            viewerDidAuthor = false,
+            reactionGroups = {},
+            diffHunk = "",
+            originalCommit = { abbreviatedOid = "abc1234" },
+            pullRequestReview = { id = "review-1" },
+          },
+        },
+      },
+    }
+  end
+
+  ---A real review-thread OctoBuffer, rendered the way thread-panel.lua and the
+  ---review-thread previewer actually render one (kind is derived, not passed:
+  ---both real call sites construct OctoBuffer with no `node`, which is what
+  ---produces kind == "reviewthread").
+  ---@param is_resolved boolean
+  ---@return OctoBuffer buffer
+  ---@return integer bufnr
+  ---@return fun() wipe
+  local function thread_buffer(is_resolved)
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    local buffer = OctoBuffer:new {
+      bufnr = bufnr,
+      repo = "owner/name",
+      commentsMetadata = {},
+      threadsMetadata = {},
+    }
+    buffer:render_threads { review_thread(is_resolved) }
+    return buffer, bufnr, function()
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+    end
+  end
+
+  ---The action names the thread-kind section's buttons carry.
+  ---@param buffer OctoBuffer
+  ---@return string[]
+  local function thread_actions(buffer)
+    for _, section in ipairs(buffer:button_sections()) do
+      if section.kind == "thread" then
+        return vim.tbl_map(function(button)
+          return button.action
+        end, buttons.rows(section.kind, section.caps))
+      end
+    end
+    return {}
+  end
+
+  it("offers Resolve, not Unresolve, on an open thread's button row", function()
+    local buffer, _, wipe = thread_buffer(false)
+
+    local actions = thread_actions(buffer)
+
+    wipe()
+    eq({ "add_reply", "resolve_thread", "react_thumbs_up" }, actions)
+  end)
+
+  it("offers Unresolve, not Resolve, on a resolved thread's button row", function()
+    -- This is the test that actually distinguishes the fix from its absence:
+    -- caps.is_resolved defaulting to nil (the unplumbed state) satisfies
+    -- VOCABULARY.thread's "Resolve" gate (is_resolved ~= true) just as well as
+    -- caps.is_resolved = false does, so the "offers Resolve" test above would
+    -- pass whether or not button_sections ever looked up the real thread state.
+    -- Only a resolved thread that stops offering Resolve and starts offering
+    -- Unresolve proves the association was actually made.
+    local buffer, _, wipe = thread_buffer(true)
+
+    local actions = thread_actions(buffer)
+
+    wipe()
+    eq({ "add_reply", "unresolve_thread", "react_thumbs_up" }, actions)
+  end)
+end)

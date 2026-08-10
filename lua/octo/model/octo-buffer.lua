@@ -1120,10 +1120,25 @@ function OctoBuffer:button_sections()
     -- way out, same as markdown_regions does for the same reason.
     local _, last = utils.get_extmark_region(self.bufnr, mark)
     if last then
+      local last_line = last + 1
+      local caps = { viewer_can_update = metadata.viewerCanUpdate == true }
+      if kind == "thread" then
+        -- A thread's resolved state lives on the thread, not the comment:
+        -- commentsMetadata flattens every comment of every thread into one list,
+        -- so a comment section cannot answer "is my thread resolved" on its own.
+        -- get_thread_at_line is the same lookup get_thread_at_cursor already uses
+        -- to answer "which thread owns this position" for resolve_thread and
+        -- unresolve_thread, so this reuses it rather than inventing a second way
+        -- to make the same comment-to-thread association.
+        local thread = self:get_thread_at_line(last_line)
+        if thread then
+          caps.is_resolved = thread.isResolved == true
+        end
+      end
       sections[#sections + 1] = {
         kind = kind,
-        last_line = last + 1,
-        caps = { viewer_can_update = metadata.viewerCanUpdate == true },
+        last_line = last_line,
+        caps = caps,
       }
     end
   end

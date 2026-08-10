@@ -3536,6 +3536,7 @@ function M.write_threads(bufnr, threads)
       replyToRest = utils.extract_rest_id(thread.comments.nodes[1].url),
       reviewId = thread.comments.nodes[1].pullRequestReview.id,
       path = thread.path,
+      isResolved = thread.isResolved == true,
       line = thread.originalStartLine ~= vim.NIL and thread.originalStartLine or thread.originalLine,
     }
   end

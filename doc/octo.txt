@@ -483,6 +483,13 @@ CONFIGURATION                                   *octo-config*
 See the README (<https://github.com/pwntester/octo.nvim>) for an example
 configuration in Lua. Open with `:Octo repo view pwntester/octo.nvim`
 
+ui~
+
+        pr_loading                      boolean (default: true)
+            Show a loading float while a picked issue, pull request or
+            discussion is fetched. It reports only; the cursor and every
+            key still go to the buffer underneath.
+
 
 PR REVIEW                                       *octo-pr-review*
 

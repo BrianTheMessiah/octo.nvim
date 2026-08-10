@@ -80,6 +80,7 @@ local M = {}
 ---@field use_signcolumn boolean
 ---@field use_statuscolumn boolean
 ---@field use_foldtext boolean
+---@field pr_loading boolean
 
 ---@class OctoConfigIssues
 ---@field order_by OctoConfigOrderBy
@@ -310,6 +311,7 @@ function M.get_default_values()
       use_signcolumn = false, -- show "modified" marks on the sign column
       use_statuscolumn = true, -- show "modified" marks on the status column
       use_foldtext = true,
+      pr_loading = true, -- show a loading float while a picked issue or pull request is fetched
     },
     issues = {
       order_by = { -- criteria to sort results of `Octo issue list`
@@ -907,6 +909,7 @@ function M.validate_config()
       validate_type(config.ui.use_signcolumn, "ui.use_signcolumn", "boolean")
       validate_type(config.ui.use_statuscolumn, "ui.use_statuscolumn", "boolean")
       validate_type(config.ui.use_foldtext, "ui.use_foldtext", "boolean")
+      validate_type(config.ui.pr_loading, "ui.pr_loading", "boolean")
     end
     if validate_type(config.colors, "colors", "table") then
       ---@diagnostic disable-next-line: no-unknown

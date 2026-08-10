@@ -117,6 +117,28 @@ describe("octo.ui.markdown buffer regions:", function()
     eq(0, count)
   end)
 
+  -- The case above renders with the option already off, so there is nothing on screen
+  -- to leave behind. Turning it off after a paint is the one a reader actually performs,
+  -- and returning early before the clear leaves the previous paint's conceals in place:
+  -- the source stays hidden with rendering supposedly off. `buttons.render` clears first
+  -- for the same reason.
+  it("clears what an earlier paint drew when the option is switched off before the next", function()
+    local config = require "octo.config"
+    local original = config.values.ui.render_markdown
+    local bufnr, wipe = scratch { "# heading" }
+    markdown.render_regions(bufnr, { { first_line = 1, last_line = 1 } })
+    local before = #vim.api.nvim_buf_get_extmarks(bufnr, markdown.buffer_namespace(), 0, -1, {})
+
+    config.values.ui.render_markdown = false
+    markdown.render_regions(bufnr, { { first_line = 1, last_line = 1 } })
+    local after = #vim.api.nvim_buf_get_extmarks(bufnr, markdown.buffer_namespace(), 0, -1, {})
+
+    config.values.ui.render_markdown = original
+    wipe()
+    assert.is_true(before > 0)
+    eq(0, after)
+  end)
+
   it("refuses to touch a buffer that is no longer valid", function()
     local bufnr, wipe = scratch { "# heading" }
     wipe()

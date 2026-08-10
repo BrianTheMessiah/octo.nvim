@@ -172,12 +172,20 @@ end
 ---@param regions octo.MarkdownRegion[] the body and comment extents, 1-based inclusive
 ---@return boolean rendered false when rendering is off, unavailable, or the buffer is gone
 function M.render_regions(bufnr, regions)
-  if not M.enabled_in_buffer() or not vim.api.nvim_buf_is_valid(bufnr) then
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+
+  -- Clear before asking whether rendering is wanted, so switching `ui.render_markdown`
+  -- off between paints erases the conceals an earlier, enabled paint drew. Returning
+  -- early instead leaves the source hidden with rendering off.
+  pcall(vim.api.nvim_buf_clear_namespace, bufnr, buffer_namespace, 0, -1)
+
+  if not M.enabled_in_buffer() then
     return false
   end
 
   local started = M.start(bufnr)
-  vim.api.nvim_buf_clear_namespace(bufnr, buffer_namespace, 0, -1)
 
   local total = vim.api.nvim_buf_line_count(bufnr)
   for _, region in ipairs(regions or {}) do

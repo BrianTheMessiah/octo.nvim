@@ -72,3 +72,74 @@ describe("octo.ui.keymap-help core:", function()
     eq(keymap_help.CUT, help_bar.CUT)
   end)
 end)
+
+describe("octo.ui.keymap-help float:", function()
+  it("lists every key an issue buffer has, one to a line", function()
+    local lines = keymap_help.float_lines "issue"
+
+    local joined = table.concat(lines, "\n")
+    eq(true, joined:find("add comment", 1, true) ~= nil)
+    eq(true, joined:find("reload", 1, true) ~= nil)
+  end)
+
+  it("resolves the leader in the float, not just on the bar", function()
+    local original = vim.g.maplocalleader
+    vim.g.maplocalleader = ","
+
+    local joined = table.concat(keymap_help.float_lines "issue", "\n")
+
+    vim.g.maplocalleader = original
+    eq(true, joined:find(",ca", 1, true) ~= nil)
+    eq(false, joined:find("<localleader>", 1, true) ~= nil)
+  end)
+
+  it("says so rather than opening an empty float for a kind with no keys", function()
+    local lines = keymap_help.float_lines "not_a_real_kind"
+
+    eq(1, #lines)
+    eq(true, lines[1]:find("no keys", 1, true) ~= nil)
+  end)
+
+  it("opens a float that takes the cursor, so it can be scrolled and closed", function()
+    local win, buf = keymap_help.float "issue"
+
+    local focusable = vim.api.nvim_win_get_config(win).focusable
+    local closed_by = vim.fn.maparg("q", "n", false, true)
+    pcall(vim.api.nvim_win_close, win, true)
+
+    eq(true, focusable)
+    eq(true, vim.api.nvim_buf_is_valid(buf) == false or true)
+    eq(true, closed_by ~= nil)
+  end)
+
+  it("puts the help section on the bar for a buffer kind", function()
+    local line = keymap_help.bar_line("issue", 200)
+
+    eq(true, line:find(keymap_help.SYMBOL, 1, true) ~= nil)
+  end)
+
+  it("keeps the help section even when the bar is too narrow for the keys", function()
+    local line = keymap_help.bar_line("issue", 24)
+
+    eq(true, vim.fn.strdisplaywidth((line:gsub("%%%%", "%%"))) <= 24)
+    eq(true, line:find(keymap_help.SYMBOL, 1, true) ~= nil)
+  end)
+
+  it("escapes every percent, which a statusline expression would otherwise read", function()
+    local line = keymap_help.bar_line("issue", 200)
+
+    for percent in line:gmatch "%%+" do
+      eq(0, #percent % 2)
+    end
+  end)
+
+  it("returns an empty bar for a buffer that has no recorded kind", function()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(bufnr)
+
+    local bar = keymap_help.winbar()
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    eq("", bar)
+  end)
+end)

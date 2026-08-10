@@ -7,6 +7,7 @@ local folds = require "octo.folds"
 local gh = require "octo.gh"
 local headers = require "octo.gh.headers"
 local graphql = require "octo.gh.graphql"
+local keymap_help = require "octo.ui.keymap-help"
 local mutations = require "octo.gh.mutations"
 local signs = require "octo.ui.signs"
 local writers = require "octo.ui.writers"
@@ -240,6 +241,7 @@ function OctoBuffer:configure()
   end)
 
   self:apply_mappings()
+  keymap_help.attach(vim.api.nvim_get_current_win(), self.bufnr, self.kind)
 end
 
 ---Accumulates all the taggable users into a single list that

@@ -125,6 +125,34 @@ describe("octo.ui.keymap-help float:", function()
     eq(true, line:find(keymap_help.SYMBOL, 1, true) ~= nil)
   end)
 
+  it("keeps the symbol at a width below what the label and section together need", function()
+    local line = keymap_help.bar_line("issue", 18)
+
+    eq(true, vim.fn.strdisplaywidth((line:gsub("%%%%", "%%"))) <= 18)
+    eq(true, line:find(keymap_help.SYMBOL, 1, true) ~= nil)
+  end)
+
+  it("keeps the symbol at a width too small for the label to survive at all", function()
+    local line = keymap_help.bar_line("issue", 8)
+
+    eq(true, vim.fn.strdisplaywidth((line:gsub("%%%%", "%%"))) <= 8)
+    eq(true, line:find(keymap_help.SYMBOL, 1, true) ~= nil)
+  end)
+
+  it("raises no error at a width of zero, and returns nothing wider than that", function()
+    local ok, line = pcall(keymap_help.bar_line, "issue", 0)
+
+    eq(true, ok)
+    eq(true, vim.fn.strdisplaywidth((line:gsub("%%%%", "%%"))) <= 0)
+  end)
+
+  it("raises no error at a negative width, and returns nothing wider than zero", function()
+    local ok, line = pcall(keymap_help.bar_line, "issue", -5)
+
+    eq(true, ok)
+    eq(true, vim.fn.strdisplaywidth((line:gsub("%%%%", "%%"))) <= 0)
+  end)
+
   it("escapes every percent, which a statusline expression would otherwise read", function()
     local line = keymap_help.bar_line("issue", 200)
 

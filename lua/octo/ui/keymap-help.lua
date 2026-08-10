@@ -281,20 +281,29 @@ end
 
 ---The bar's single line for one buffer kind.
 ---
----The help section is reserved out of the width before the keys are laid out, so it
----is the one thing that cannot be truncated away: it is what tells the reader where
----the rest went.
+---The help section is reserved out of the width before the keys are laid out, and it
+---is the last thing cut, not the first: while the section itself still fits, only the
+---label ahead of it gives up width, truncated down to make room. Only once the section
+---alone would not fit does its own tail start to go -- `M.truncate` cuts from the end,
+---and the symbol sits at the section's front, so the symbol is the last thing lost
+---rather than the first thing dropped.
 ---@param kind string the mapping kind to describe
----@param width integer columns available
+---@param width integer columns available; clamped to zero if negative
 ---@param handlers table<string, function>|nil the action handlers; octo's own when omitted
----@return string a statusline expression with every percent escaped
+---@return string a statusline expression with every percent escaped, never wider than width
 function M.bar_line(kind, width, handlers)
+  width = math.max(width, 0)
   local section = ("  %s %s"):format(vim.fn.nr2char(0x2502), M.section())
   local opening = (" %s   "):format(M.LABELS[kind] or kind)
-  local reserved = vim.fn.strdisplaywidth(opening) + vim.fn.strdisplaywidth(section)
+  local section_width = vim.fn.strdisplaywidth(section)
+  local reserved = vim.fn.strdisplaywidth(opening) + section_width
+
+  if width <= section_width then
+    return (M.truncate(section, width):gsub("%%", "%%%%"))
+  end
 
   if width <= reserved then
-    return ((M.truncate(opening .. section, width):gsub("%%", "%%%%")))
+    return ((M.truncate(opening, width - section_width) .. section):gsub("%%", "%%%%"))
   end
 
   local parts = {}

@@ -68,4 +68,27 @@ describe("octo comment popup help:", function()
 
     eq(true, config_footer == nil or config_footer == "")
   end)
+
+  it("renders the four keys a comment popup binds, with the leader resolved", function()
+    local original = vim.g.mapleader
+    vim.g.mapleader = ";"
+
+    local lines = keymap_help.float_lines "comment_popup"
+    local joined = table.concat(lines, "\n")
+
+    vim.g.mapleader = original
+
+    local first_words = {}
+    for _, line in ipairs(lines) do
+      first_words[line:match "%S+"] = true
+    end
+
+    eq(true, first_words["<C-s>"] == true)
+    eq(true, first_words[";op"] == true)
+    eq(true, first_words["q"] == true)
+    eq(true, first_words["<C-c>"] == true)
+    eq(false, joined:find("<leader>", 1, true) ~= nil)
+    eq(true, joined:find("send this comment", 1, true) ~= nil)
+    eq(true, joined:find("close, keeping a draft", 1, true) ~= nil)
+  end)
 end)

@@ -485,6 +485,11 @@ configuration in Lua. Open with `:Octo repo view pwntester/octo.nvim`
 
 ui~
 
+        render_markdown                 boolean (default: true)
+            Render the markdown in bodies and comments rather than showing
+            its source. The line the cursor is on always shows its source,
+            so text stays editable.
+
         pr_loading                      boolean (default: true)
             Show a loading float while a picked issue, pull request or
             discussion is fetched. It reports only; the cursor and every

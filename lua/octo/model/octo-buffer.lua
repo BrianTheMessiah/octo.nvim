@@ -8,6 +8,7 @@ local gh = require "octo.gh"
 local headers = require "octo.gh.headers"
 local graphql = require "octo.gh.graphql"
 local keymap_help = require "octo.ui.keymap-help"
+local markdown = require "octo.ui.markdown"
 local mutations = require "octo.gh.mutations"
 local signs = require "octo.ui.signs"
 local writers = require "octo.ui.writers"
@@ -116,6 +117,7 @@ function OctoBuffer:render_repo()
   vim.bo[self.bufnr].modified = false
 
   self.ready = true
+  self:render_markdown()
 end
 
 function OctoBuffer:render_release()
@@ -123,6 +125,7 @@ function OctoBuffer:render_release()
   writers.write_release(self.bufnr, self:release())
   vim.bo[self.bufnr].modified = false
   self.ready = true
+  self:render_markdown()
 end
 
 function OctoBuffer:render_discussion()
@@ -169,6 +172,7 @@ function OctoBuffer:render_discussion()
   vim.bo[self.bufnr].filetype = "octo"
 
   self.ready = true
+  self:render_markdown()
 end
 
 ---Writes an issue or pull request to the buffer.
@@ -206,6 +210,7 @@ function OctoBuffer:render_issue()
   vim.bo[self.bufnr].modified = false
 
   self.ready = true
+  self:render_markdown()
 end
 
 ---Draws review threads
@@ -239,6 +244,33 @@ function OctoBuffer:configure()
       vim.opt_local.foldtext = [[v:lua.require'octo.folds'.foldtext()]]
     end
   end)
+
+  -- Conceal extmarks shift with edits on their own, so this is only ever about
+  -- markdown the reader has just *typed*: a `**` that has no span yet. Debounced,
+  -- because it runs a treesitter-free line scan over every body and comment and
+  -- TextChangedI fires on every keystroke.
+  local pending ---@type uv.uv_timer_t?
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+    buffer = self.bufnr,
+    desc = "Octo: keep the rendered markdown current as the buffer is edited",
+    callback = function()
+      if pending then
+        pending:stop()
+        if not pending:is_closing() then
+          pending:close()
+        end
+      end
+      pending = assert(vim.uv.new_timer())
+      pending:start(
+        150,
+        0,
+        vim.schedule_wrap(function()
+          pending = nil
+          self:render_markdown()
+        end)
+      )
+    end,
+  })
 
   self:apply_mappings()
   keymap_help.attach(vim.api.nvim_get_current_win(), self.bufnr, self.kind)
@@ -1000,6 +1032,56 @@ function OctoBuffer:update_metadata()
     metadata.endLine = end_line
     metadata.dirty = utils.trim(metadata.body) ~= utils.trim(metadata.savedBody) and true or false
   end
+end
+
+---The body and comment extents markdown may be rendered over.
+---
+---Read straight off each metadata's extmark rather than from `startLine`/`endLine`,
+---which `update_metadata` only fills in for issues, pull requests and discussions --
+---a release's body is written through the same `write_body_agnostic` and has an
+---extmark just the same. Reading the mark keeps this kind-agnostic and free of any
+---ordering dependency on `update_metadata` having run first.
+---
+---`utils.get_extmark_region` answers in 0-based rows (it feeds `nvim_buf_get_lines`
+---directly); `octo.MarkdownRegion` is 1-based inclusive, so each end is shifted by one
+---on the way out.
+---@return octo.MarkdownRegion[] regions in buffer order, 1-based inclusive
+function OctoBuffer:markdown_regions()
+  local regions = {}
+
+  ---@param metadata BodyMetadata|CommentMetadata|nil
+  local function add(metadata)
+    if not metadata or not metadata.extmark then
+      return
+    end
+    local mark =
+      vim.api.nvim_buf_get_extmark_by_id(self.bufnr, constants.OCTO_COMMENT_NS, metadata.extmark, { details = true })
+    if vim.tbl_isempty(mark) then
+      return
+    end
+    local first, last = utils.get_extmark_region(self.bufnr, mark)
+    if first and last and last >= first then
+      regions[#regions + 1] = { first_line = first + 1, last_line = last + 1 }
+    end
+  end
+
+  add(self.bodyMetadata)
+  for _, metadata in ipairs(self.commentsMetadata or {}) do
+    add(metadata)
+  end
+
+  return regions
+end
+
+---Renders the markdown in this buffer's bodies and comments.
+---
+---Safe to call on a buffer that is not ready: there are no regions yet, so it does
+---nothing rather than half-rendering a buffer mid-paint.
+function OctoBuffer:render_markdown()
+  if not self.ready then
+    return
+  end
+  markdown.render_regions(self.bufnr, self:markdown_regions())
 end
 
 ---Renders the signs in the signcolumn or statuscolumn

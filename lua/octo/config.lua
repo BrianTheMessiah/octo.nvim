@@ -77,6 +77,7 @@ local M = {}
 
 ---@class OctoConfigUi
 ---@field conceallevel integer
+---@field render_markdown boolean
 ---@field use_signcolumn boolean
 ---@field use_statuscolumn boolean
 ---@field use_foldtext boolean
@@ -308,6 +309,7 @@ function M.get_default_values()
     },
     ui = {
       conceallevel = 2, -- conceallevel for octo buffers
+      render_markdown = true, -- render the markdown in bodies and comments rather than showing its source
       use_signcolumn = false, -- show "modified" marks on the sign column
       use_statuscolumn = true, -- show "modified" marks on the status column
       use_foldtext = true,
@@ -906,6 +908,7 @@ function M.validate_config()
     validate_type(config.default_merge_method, "default_merge_method", "string")
     validate_string_enum(config.default_merge_method, "default_merge_method", { "merge", "rebase", "squash" })
     if validate_type(config.ui, "ui", "table") then
+      validate_type(config.ui.render_markdown, "ui.render_markdown", "boolean")
       validate_type(config.ui.use_signcolumn, "ui.use_signcolumn", "boolean")
       validate_type(config.ui.use_statuscolumn, "ui.use_statuscolumn", "boolean")
       validate_type(config.ui.use_foldtext, "ui.use_foldtext", "boolean")

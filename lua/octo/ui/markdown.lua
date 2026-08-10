@@ -135,4 +135,66 @@ function M.start(bufnr)
   return pcall(vim.treesitter.start, bufnr, "markdown")
 end
 
+local config = require "octo.config"
+
+---@class octo.MarkdownRegion
+---@field first_line integer 1-based first buffer line of the region, inclusive
+---@field last_line integer 1-based last buffer line of the region, inclusive
+
+---The extmark namespace live buffers are decorated in.
+---
+---Deliberately not the preview module's: a preview buffer and a live buffer are never
+---the same buffer, but sharing a namespace would mean either one's clear wiped the
+---other's marks if that ever stopped being true.
+local buffer_namespace = vim.api.nvim_create_namespace "octo_buffer_markdown"
+
+---The extmark namespace live buffer rendering owns.
+---@return integer
+function M.buffer_namespace()
+  return buffer_namespace
+end
+
+---Whether rendering in live octo buffers is wanted, per `ui.render_markdown`.
+---@return boolean true unless the option is explicitly false
+function M.enabled_in_buffer()
+  return config.values.ui.render_markdown ~= false
+end
+
+---Render the markdown in a live octo buffer.
+---
+---Highlighting is started buffer-wide, because treesitter's inline conceal captures
+---cannot be region-gated cheaply and octo's own colours are extmarks at priority 4096
+---against treesitter's 100, so they draw over it rather than being lost to it. The
+---block-punctuation conceals are region-scoped, because octo chrome is full of lines
+---opening with `-` or `#` that are not markdown and must not be redrawn as though
+---they were.
+---@param bufnr integer the octo buffer
+---@param regions octo.MarkdownRegion[] the body and comment extents, 1-based inclusive
+---@return boolean rendered false when rendering is off, unavailable, or the buffer is gone
+function M.render_regions(bufnr, regions)
+  if not M.enabled_in_buffer() or not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+
+  local started = M.start(bufnr)
+  vim.api.nvim_buf_clear_namespace(bufnr, buffer_namespace, 0, -1)
+
+  local total = vim.api.nvim_buf_line_count(bufnr)
+  for _, region in ipairs(regions or {}) do
+    local first = math.max(region.first_line or 1, 1)
+    local last = math.min(region.last_line or 0, total)
+    if last >= first then
+      local lines = vim.api.nvim_buf_get_lines(bufnr, first - 1, last, false)
+      for _, span in ipairs(M.conceal_spans(lines)) do
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, buffer_namespace, first - 1 + span.row, span.start_col, {
+          end_col = span.end_col,
+          conceal = span.replacement,
+        })
+      end
+    end
+  end
+
+  return started
+end
+
 return M

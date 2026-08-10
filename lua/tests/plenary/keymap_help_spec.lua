@@ -49,9 +49,12 @@ describe("octo.ui.keymap-help core:", function()
 
     local entries = keymap_help.entries_from(mappings, { "first" }, handlers)
 
-    eq({ "first", "apple", "zebra" }, vim.tbl_map(function(entry)
-      return entry.action
-    end, entries))
+    eq(
+      { "first", "apple", "zebra" },
+      vim.tbl_map(function(entry)
+        return entry.action
+      end, entries)
+    )
   end)
 
   it("has a symbol that is not empty, so the section is never a bare separator", function()

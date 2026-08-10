@@ -239,14 +239,16 @@ describe("octo.ui.buttons click handling:", function()
     for opt, value in pairs(winopts or {}) do
       vim.wo[win][opt] = value
     end
-    return bufnr, win, function()
-      if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_win_close(win, true)
+    return bufnr,
+      win,
+      function()
+        if vim.api.nvim_win_is_valid(win) then
+          vim.api.nvim_win_close(win, true)
+        end
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          vim.api.nvim_buf_delete(bufnr, { force = true })
+        end
       end
-      if vim.api.nvim_buf_is_valid(bufnr) then
-        vim.api.nvim_buf_delete(bufnr, { force = true })
-      end
-    end
   end
 
   ---Makes `win` current (a real mouse click always switches window/buffer before its
@@ -377,11 +379,9 @@ describe("OctoBuffer button sections and decorations:", function()
       lastEditedAt = vim.NIL,
       includesCreatedEdit = vim.NIL,
     })
-    return buffer,
-      bufnr,
-      function()
-        vim.api.nvim_buf_delete(bufnr, { force = true })
-      end
+    return buffer, bufnr, function()
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+    end
   end
 
   it("builds a body section from the body's real extmark, carrying its capabilities", function()

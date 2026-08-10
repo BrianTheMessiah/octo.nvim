@@ -3224,6 +3224,53 @@ If the run turned up nothing, make no commit and say so.
 
 ---
 
+## What the live run turned up
+
+Driven headlessly against two real pull requests in `pwntester/octo.nvim` --
+1515 (no comments) and 1461 (four comments) -- over the network, with `gh` authenticated.
+
+**Two defects, both fixed here.**
+
+1. *A pull request buffer reported no keys at all.* `OctoBuffer.kind` is `pull`, but the
+   mappings sit under `mappings.pull_request` -- the translation
+   `OctoBuffer:apply_mappings` already makes. `keymap-help` read the kind straight, so the
+   winbar read `pull   no keys mapped` and `g?` opened a float saying
+   `no keys mapped for pull`. `issue`, `discussion`, `repo` and `release` all name their
+   config block after themselves, so only the headline surface was affected and no spec
+   caught it. Fixed with `M.CONFIG_KEY`; the bar now opens
+   `\ca add comment  \cr add reply  \po checkout pr  \pf list changed files`, and the float
+   lists 47 keys.
+2. *Turning rendering off left the rendering on screen.* `markdown.render_regions` returned
+   before its own `clear_namespace`, so flipping `ui.render_markdown` to false between
+   paints kept the previous paint's conceals -- the source stayed hidden with rendering
+   supposedly off. `buttons.render` already clears first for exactly this reason. Fixed,
+   and both toggles now drop to zero extmarks.
+
+**What the run confirmed.** On PR 1461: six button sections (body, four comments, footer),
+six rows drawn as `virt_lines` in `octo_buttons`, never as buffer text; eight markdown
+conceals in `octo_buffer_markdown`, the two namespaces distinct; octo's own decorations
+still populated alongside them (`OCTO_COMMENT_NS` 6, `OCTO_DETAILS_VT_NS` 16,
+`OCTO_EVENT_VT_NS` 6); zero markdown marks on any timeline event line -- the bleed the
+spec's residual risk warned about did not occur on either pull request. The popup's footer
+reads `<C-s> send  q close  ⌨ g? keys` with `<C-s>` bound in normal and insert mode; the
+fzf header reads `│ ⌨ ctrl-g keys`.
+
+**Still needs a human at a real terminal.** Nothing headless can settle these: that the
+winbar and buttons *look* right rather than rendering as bold `WinBar` text; that octo's
+colours (label bubbles, detail labels, usernames, state) read correctly next to the
+conceals; that treesitter's buffer-wide inline conceal never eats a character in octo
+chrome; that the cursor landing on a rendered line reveals its source and re-renders on
+leaving; that a real mouse click fires a button; that the loading float opens above the
+picker rather than behind it, and comes down as the buffer paints; and the
+`ui.pr_loading = false` toggle.
+
+**Gates.** Suite green: 41 spec files, 737 passing assertions, no failures or errors.
+Formatting checked with stylua 2.3.1, the version `.pre-commit-config.yaml` pins -- the
+branch matches master's baseline exactly. `make check` was not run: `lua-language-server`
+is not installed in this environment. `make format` likewise: `prek` is not installed.
+
+---
+
 ## Self-Review
 
 **Spec coverage.** Every section of the design maps to a task: markdown core and buffer

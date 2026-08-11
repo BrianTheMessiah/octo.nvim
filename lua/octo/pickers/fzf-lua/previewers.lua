@@ -16,6 +16,7 @@ local preview_markdown = require "octo.pickers.fzf-lua.preview_markdown"
 local preview_prefetch = require "octo.pickers.fzf-lua.preview_prefetch"
 local preview_throttle = require "octo.pickers.fzf-lua.preview_throttle"
 local preview_warmer = require "octo.pickers.fzf-lua.preview_warmer"
+local preview_session_cache = require "octo.pickers.fzf-lua.preview_session_cache"
 
 local M = {}
 
@@ -147,6 +148,10 @@ end
 local function fetch_entry(entry, done)
   fetch_preview(entry.kind, entry.repo, entry.value, done)
 end
+
+---Exposed for `preview_startup`, which warms the shared session cache before any
+---picker has opened and so has no previewer instance to borrow this from.
+M.fetch_preview = fetch_preview
 
 ---A shallow copy of a payload whose body has had its inline HTML rewritten as
 ---markdown. The cached payload itself is never touched, so what the cache holds
@@ -304,7 +309,10 @@ function M.search(formatted_items)
     return self
   end
 
-  local cache = preview_cache.new()
+  -- The session cache rather than a fresh one: a search picker's results are
+  -- content-addressed by kind/repo/number, so a pull request warmed at startup,
+  -- or left over from the last time this query ran, needs no second fetch here.
+  local cache = preview_session_cache.get()
 
   local warmer = preview_warmer.new {
     cache = cache,
@@ -321,10 +329,14 @@ function M.search(formatted_items)
     end,
   }
 
+  -- No `cache:abandon()` here: the session cache outlives this picker, so
+  -- clearing its waiters on close would cancel in-flight requests that belong to
+  -- the startup warmer or to whatever picker opens next. Every consumer of
+  -- `on_ready` already checks the target buffer is still this picker's before
+  -- painting into it, so a completion arriving after close paints nothing.
   function previewer:close(do_not_clear_cache)
     warmer:stop()
     loading.abandon()
-    cache:abandon()
     return previewer.super.close(self, do_not_clear_cache)
   end
 

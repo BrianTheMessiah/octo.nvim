@@ -234,7 +234,83 @@ function M.entries(kind, handlers)
   return M.entries_from(mappings, M.ORDER[kind] or {}, handlers)
 end
 
----The float's content: every key a kind has, one to a line.
+---The surfaces a reviewer meets a pending comment on.
+---
+---All three, because the sequence can be started from any of them: the diff is where a
+---comment is added, a thread is where one is replied to, and the submit window is the step
+---people are looking for when they go hunting for the help in the first place.
+M.NOTED = {
+  review_diff = true,
+  review_thread = true,
+  submit_win = true,
+}
+
+---A configured mapping's key, drawn the way the reader has to type it.
+---@param group string the `config.values.mappings` group
+---@param action string the action within it
+---@return string|nil nil when nothing is bound
+local function bound(group, action)
+  local mapping = (config.values.mappings[group] or {})[action]
+  local lhs = type(mapping) == "table" and mapping.lhs or nil
+  if lhs == nil or lhs == "" then
+    return nil
+  end
+  return M.pretty_lhs(lhs)
+end
+
+---What a list of keys cannot say on its own.
+---
+---A review comment is *pending*. Writing the buffer records it locally; it reaches GitHub,
+---and the author, only when the review itself is submitted. That is two steps, and the key
+---list cannot express it -- both steps read as ordinary independent keys, so stopping
+---after the first looks finished and is the mistake the list invites.
+---
+---The keys are read from the configuration rather than written out here, so a rebound key
+---is named correctly and a note can never drift from what is actually bound.
+---@param kind string the mapping kind being described
+---@return string[] lines empty for a kind with nothing extra to say
+function M.note_lines(kind)
+  if not M.NOTED[kind] then
+    return {}
+  end
+
+  local add = bound("review_diff", "add_review_comment")
+  local reply = bound("review_thread", "add_reply")
+  local submit = bound("review_diff", "submit_review")
+  local approve = bound("submit_win", "approve_review")
+  local comment = bound("submit_win", "comment_review")
+  local request = bound("submit_win", "request_changes")
+
+  local verdicts = {}
+  for _, pair in ipairs { { approve, "approve" }, { comment, "comment" }, { request, "request changes" } } do
+    if pair[1] then
+      verdicts[#verdicts + 1] = ("%s %s"):format(pair[1], pair[2])
+    end
+  end
+
+  -- Appended one at a time rather than built as a constructor with `nil` holes in it,
+  -- which would leave `#lines` undefined.
+  local lines = { "", " a comment is pending until the review is submitted" }
+  local step = 0
+  local function say(text)
+    step = step + 1
+    lines[#lines + 1] = (" %d. %s"):format(step, text)
+  end
+
+  local start = add or reply
+  if start then
+    say(("%s writes it, and it stays on this machine"):format(start))
+  end
+  if submit then
+    say(("%s opens the submit window"):format(submit))
+  end
+  if #verdicts > 0 then
+    say(table.concat(verdicts, " · "))
+  end
+  return lines
+end
+
+---The float's content: every key a kind has, one to a line, and what the keys leave out.
 ---@param kind string the mapping kind to describe
 ---@param handlers table<string, function>|nil the action handlers; octo's own when omitted
 ---@return string[] lines at least one, never empty
@@ -254,6 +330,10 @@ function M.float_lines(kind, handlers)
     local pad = string.rep(" ", widest - vim.fn.strdisplaywidth(entry.lhs))
     lines[#lines + 1] = (" %s%s   %s"):format(entry.lhs, pad, entry.label)
   end
+
+  -- Below the keys, never instead of them: the note explains a sequence the keys are part
+  -- of, so it reads as a footnote to the list rather than a replacement for it.
+  vim.list_extend(lines, M.note_lines(kind))
   return lines
 end
 

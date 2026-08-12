@@ -193,4 +193,55 @@ describe("octo.ui.keymap-help float:", function()
     eq(true, vim.tbl_contains(actions, "checkout_pr"))
     eq(false, keymap_help.bar_line("pull", 200):find "no keys mapped" ~= nil)
   end)
+
+  ----------------------------------------------------------------------------
+  -- the pending-comment sequence, which a list of keys cannot express
+  ----------------------------------------------------------------------------
+
+  it("tells a reviewer that a comment is pending until the review is submitted", function()
+    local text = table.concat(keymap_help.note_lines "review_diff", "\n")
+
+    eq(true, text:lower():find("pending", 1, true) ~= nil)
+  end)
+
+  it("names the keys of the sequence as they are actually bound", function()
+    local config = require "octo.config"
+    local text = table.concat(keymap_help.note_lines "review_diff", "\n")
+    local add = config.values.mappings.review_diff.add_review_comment.lhs
+    local submit = config.values.mappings.review_diff.submit_review.lhs
+    local approve = config.values.mappings.submit_win.approve_review.lhs
+
+    eq(true, text:find(keymap_help.pretty_lhs(add), 1, true) ~= nil)
+    eq(true, text:find(keymap_help.pretty_lhs(submit), 1, true) ~= nil)
+    eq(true, text:find(keymap_help.pretty_lhs(approve), 1, true) ~= nil)
+  end)
+
+  it("follows a rebound key rather than a hardcoded one", function()
+    local config = require "octo.config"
+    local original = config.values.mappings.review_diff.add_review_comment.lhs
+    config.values.mappings.review_diff.add_review_comment.lhs = "<localleader>zz"
+
+    local text = table.concat(keymap_help.note_lines "review_diff", "\n")
+    config.values.mappings.review_diff.add_review_comment.lhs = original
+
+    eq(true, text:find("zz", 1, true) ~= nil)
+  end)
+
+  it("says the same thing in the thread and submit surfaces, and nothing in unrelated ones", function()
+    eq(true, #keymap_help.note_lines "review_thread" > 0)
+    eq(true, #keymap_help.note_lines "submit_win" > 0)
+    eq(0, #keymap_help.note_lines "pull")
+    eq(0, #keymap_help.note_lines "picker")
+  end)
+
+  it("puts the note under the keys in the float, not instead of them", function()
+    local lines = keymap_help.float_lines "review_diff"
+    local text = table.concat(lines, "\n")
+    local keys = table.concat(keymap_help.float_lines "pull", "\n")
+
+    -- the float still lists keys, and the note is below them
+    eq(true, #lines > #keymap_help.note_lines "review_diff")
+    eq(true, text:lower():find("pending", 1, true) ~= nil)
+    eq(false, keys:lower():find("pending", 1, true) ~= nil)
+  end)
 end)

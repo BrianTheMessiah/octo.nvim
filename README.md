@@ -301,9 +301,12 @@ require"octo".setup {
   },
   ui = {
     conceallevel = 2, -- conceallevel for octo buffers
+    render_markdown = true, -- render the markdown in bodies and comments rather than showing its source
     use_signcolumn = false, -- show "modified" marks on the sign column
     use_statuscolumn = true, -- show "modified" marks on the status column
     use_foldtext = true,
+    pr_loading = true, -- show a loading float while a picked issue or pull request is fetched
+    section_buttons = true, -- draw a row of actions under each body, comment and thread
   },
   issues = {
     order_by = { -- criteria to sort results of `Octo issue list`
@@ -384,6 +387,7 @@ require"octo".setup {
       react_rocket = { lhs = "<localleader>rr", desc = "add/remove 🚀 reaction" },
       react_laugh = { lhs = "<localleader>rl", desc = "add/remove 😄 reaction" },
       react_confused = { lhs = "<localleader>rc", desc = "add/remove 😕 reaction" },
+      close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
     },
     runs = {
       expand_step = { lhs = "o", desc = "expand workflow step" },
@@ -427,6 +431,7 @@ require"octo".setup {
       react_rocket = { lhs = "<localleader>rr", desc = "add/remove 🚀 reaction" },
       react_laugh = { lhs = "<localleader>rl", desc = "add/remove 😄 reaction" },
       react_confused = { lhs = "<localleader>rc", desc = "add/remove 😕 reaction" },
+      close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
     },
     pull_request = {
       pr_options = { lhs = "<CR>", desc = "show PR options" },
@@ -485,6 +490,7 @@ require"octo".setup {
       review_resume = { lhs = "<localleader>vr", desc = "resume a pending review for the current PR" },
       resolve_thread = { lhs = "<localleader>rt", desc = "resolve PR thread" },
       unresolve_thread = { lhs = "<localleader>rT", desc = "unresolve PR thread" },
+      close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
     },
     review_thread = {
       goto_issue = { lhs = "<localleader>gi", desc = "navigate to a local repo issue" },
@@ -571,9 +577,11 @@ require"octo".setup {
       create_discussion = { lhs = "<localleader>dc", desc = "create discussion" },
       contributing_guidelines = { lhs = "<localleader>cg", desc = "view contributing guidelines" },
       open_in_browser = { lhs = "<C-b>", desc = "open repo in browser" },
+      close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
     },
     release = {
       open_in_browser = { lhs = "<C-b>", desc = "open release in browser" },
+      close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
     },
   },
   poll = {

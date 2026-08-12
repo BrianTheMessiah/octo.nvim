@@ -1,6 +1,7 @@
 local Layout = require("octo.reviews.layout").Layout
 local Rev = require("octo.reviews.rev").Rev
 local config = require "octo.config"
+local pr_loading = require "octo.ui.pr-loading"
 local gh = require "octo.gh"
 local queries = require "octo.gh.queries"
 local graphql = require "octo.gh.graphql"
@@ -64,6 +65,7 @@ function Review:populate_threads(callback)
     opts = {
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
+          pr_loading.hide()
           utils.error(stderr)
         elseif output then
           local resp = vim.json.decode(output)
@@ -121,6 +123,7 @@ function Review:resume()
     end
 
     if self.id == default_id then
+      pr_loading.hide()
       utils.error "No pending reviews found for viewer"
       return
     end
@@ -181,6 +184,9 @@ function Review:set_files_and_select_first(files)
     file:fetch(false)
   end
   self.layout:update_files()
+
+  -- The end of the wait the float was reporting: there is a diff on screen now.
+  pr_loading.hide()
 end
 
 ---Updates layout to focus on a single commit
@@ -212,6 +218,10 @@ function Review:initiate(opts)
   local pr = self.pull_request
   local conf = config.values
   if conf.use_local_fs and not utils.in_pr_branch(pr) then
+    -- Off the screen before a blocking prompt: a spinner animating under a confirm the
+    -- reader has to answer, and under the synchronous checkout that may follow, is noise
+    -- reporting nothing. It goes back up below, for the fetch that is actually waiting.
+    pr_loading.hide()
     local choice = vim.fn.confirm("Currently not in PR branch, would you like to checkout?", "&Yes\n&No", 2)
     if choice == 1 then
       utils.checkout_pr_sync { repo = pr.repo, pr_number = pr.number }
@@ -225,6 +235,10 @@ function Review:initiate(opts)
     files = {},
   }
   self.layout:open(self)
+
+  -- After `Layout:open`, which `tab split`s -- so this reopens the float in the tabpage the
+  -- layout just made, rather than updating one stranded in the tab we came from.
+  pr_loading.show(pr.repo, "pull", pr.number, "loading changed files…")
 
   pr:get_changed_files(function(files)
     self:set_files_and_select_first(files)
@@ -259,11 +273,13 @@ function Review:discard(opts)
     opts = {
       cb = function(output, stderr)
         if stderr and not utils.is_blank(stderr) then
+          pr_loading.hide()
           utils.error(stderr)
         elseif output then
           ---@type octo.queries.PendingReviewThreads
           local resp = vim.json.decode(output)
           if #resp.data.repository.pullRequest.reviews.nodes == 0 then
+            pr_loading.hide()
             utils.error "No pending reviews found"
             return
           end
@@ -645,15 +661,27 @@ local function get_pr_from_buffer_or_current_branch(cb)
   end
 end
 
+---Put the loading float up for a review that is getting under way.
+---
+---At the point the pull request is known, which is inside
+---`get_pr_from_buffer_or_current_branch`'s callback rather than before it: the float names
+---what it is waiting on, and there is nothing to name until the PR has been resolved.
+---@param pull_request table the pull request the review is on
+local function show_starting(pull_request)
+  pr_loading.show(pull_request.repo, "pull", pull_request.number, "starting review…")
+end
+
 function M.browse_review()
   local current_review = M.get_current_review()
 
   if current_review and current_review.id ~= -1 then
+    pr_loading.hide()
     utils.error "Cannot browse when a review has been started"
     return
   end
 
   get_pr_from_buffer_or_current_branch(function(pull_request)
+    show_starting(pull_request)
     current_review = Review:new(pull_request)
     current_review:browse()
   end)
@@ -663,11 +691,13 @@ function M.start_review()
   -- its possible we are already browsing a review with 'Octo review browse'
   local current_review = M.get_current_review()
   if current_review then
+    show_starting(current_review.pull_request)
     current_review:start()
     return
   end
 
   get_pr_from_buffer_or_current_branch(function(pull_request)
+    show_starting(pull_request)
     current_review = Review:new(pull_request)
     current_review:start()
   end)
@@ -675,6 +705,7 @@ end
 
 function M.resume_review()
   get_pr_from_buffer_or_current_branch(function(pull_request)
+    show_starting(pull_request)
     local current_review = Review:new(pull_request)
     current_review:resume()
   end)
@@ -682,6 +713,7 @@ end
 
 function M.start_or_resume_review()
   get_pr_from_buffer_or_current_branch(function(pull_request)
+    show_starting(pull_request)
     local current_review = Review:new(pull_request)
     current_review:start_or_resume()
   end)

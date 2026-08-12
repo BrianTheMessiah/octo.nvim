@@ -103,4 +103,63 @@ describe("octo pr loading:", function()
     config.values.ui.pr_loading = original
     eq(false, open)
   end)
+
+  ----------------------------------------------------------------------------
+  -- what the review needs: its own wording, and a float that survives the
+  -- `tab split` in `Layout:open`
+  ----------------------------------------------------------------------------
+
+  it("says 'fetching' when no message is given, so the buffer path is unchanged", function()
+    pr_loading.show("pwntester/octo.nvim", "pull", 123)
+    local text = table.concat(vim.api.nvim_buf_get_lines(pr_loading.buffer(), 0, -1, false), "\n")
+
+    eq(true, text:find("fetching", 1, true) ~= nil)
+  end)
+
+  it("carries a message given to it, so a review can say what it is waiting on", function()
+    pr_loading.show("pwntester/octo.nvim", "pull", 123, "loading changed files")
+    local text = table.concat(vim.api.nvim_buf_get_lines(pr_loading.buffer(), 0, -1, false), "\n")
+
+    eq(true, text:find("loading changed files", 1, true) ~= nil)
+  end)
+
+  it("replaces the message on a second show without reopening the float", function()
+    pr_loading.show("pwntester/octo.nvim", "pull", 123, "starting review")
+    local first = pr_loading.window()
+
+    pr_loading.show("pwntester/octo.nvim", "pull", 123, "loading changed files")
+    local text = table.concat(vim.api.nvim_buf_get_lines(pr_loading.buffer(), 0, -1, false), "\n")
+
+    eq(first, pr_loading.window())
+    eq(true, text:find("loading changed files", 1, true) ~= nil)
+    eq(false, text:find("starting review", 1, true) ~= nil)
+  end)
+
+  it("is not open once a tab split has left it in the previous tabpage", function()
+    -- `Layout:open` runs `tab split`. A float belongs to the tabpage it was created in, so
+    -- without this the float is stranded where the reader can no longer see it while
+    -- `is_open` still answers true -- and `show` would then update an invisible window.
+    pr_loading.show("pwntester/octo.nvim", "pull", 123, "starting review")
+    local before = pr_loading.window()
+
+    vim.cmd "tab split"
+
+    eq(true, vim.api.nvim_win_is_valid(before))
+    eq(false, pr_loading.is_open())
+
+    vim.cmd "tabclose"
+  end)
+
+  it("reopens in the tabpage the reader is now in", function()
+    pr_loading.show("pwntester/octo.nvim", "pull", 123, "starting review")
+    vim.cmd "tab split"
+
+    pr_loading.show("pwntester/octo.nvim", "pull", 123, "loading changed files")
+
+    eq(true, pr_loading.is_open())
+    eq(vim.api.nvim_get_current_tabpage(), vim.api.nvim_win_get_tabpage(pr_loading.window()))
+
+    pr_loading.hide()
+    vim.cmd "tabclose"
+  end)
 end)

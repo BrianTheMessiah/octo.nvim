@@ -521,6 +521,60 @@ return {
   close_review_win = function()
     vim.api.nvim_win_close(vim.api.nvim_get_current_win(), true)
   end,
+  ---Leave an octo buffer, putting the reader back where they were before it.
+  ---
+  ---There was no way out of a pull request buffer but `:q` or `:bd`. The nearest thing the
+  ---keys offered was `close_issue`, labelled "close PR" -- which closes the pull request on
+  ---GitHub, and is exactly what somebody looking for "close this" would try first.
+  ---
+  ---An `octo://` buffer is throwaway: reopening refetches it, so it is wiped rather than
+  ---left in the buffer list. Where the reader lands is read off the window layout, rather
+  ---than from bookkeeping octo would have to keep in step with every way a buffer opens.
+  close_buffer = function()
+    local bufnr = vim.api.nvim_get_current_buf()
+    if not vim.startswith(vim.api.nvim_buf_get_name(bufnr), "octo://") then
+      return
+    end
+
+    local win = vim.api.nvim_get_current_win()
+    local windows = #vim.api.nvim_tabpage_list_wins(0)
+
+    ---Whether the alternate buffer is somewhere worth being returned to.
+    ---
+    ---A named buffer is the file the reader was in when they opened the pull request, which
+    ---is the whole point. The empty unnamed buffer a `tabnew` leaves behind is not: landing
+    ---there would swap a pull request for a blank tab.
+    ---@return integer|nil
+    local function worth_returning_to()
+      local alternate = vim.fn.bufnr "#"
+      if alternate == -1 or alternate == bufnr or not vim.api.nvim_buf_is_valid(alternate) then
+        return nil
+      end
+      if vim.api.nvim_buf_get_name(alternate) ~= "" or vim.bo[alternate].modified then
+        return alternate
+      end
+      return nil
+    end
+
+    local alternate = worth_returning_to()
+    if windows > 1 then
+      -- One window of several: close it, and leave the rest of the tab as it was.
+      pcall(vim.api.nvim_win_close, win, true)
+    elseif alternate then
+      vim.api.nvim_set_current_buf(alternate)
+    elseif #vim.api.nvim_list_tabpages() > 1 then
+      -- Octo had the tabpage to itself, and there is nothing in it to go back to.
+      pcall(vim.api.nvim_win_close, win, true)
+    else
+      -- The last window of the last tabpage: closing it would end nvim, which leaving a
+      -- reader may never do.
+      vim.cmd "enew"
+    end
+
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end
+  end,
   approve_review = function()
     local current_review = reviews.get_current_review()
     if not current_review then

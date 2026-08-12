@@ -396,6 +396,7 @@ function M.get_default_values()
         react_rocket = { lhs = "<localleader>rr", desc = "add/remove 🚀 reaction" },
         react_laugh = { lhs = "<localleader>rl", desc = "add/remove 😄 reaction" },
         react_confused = { lhs = "<localleader>rc", desc = "add/remove 😕 reaction" },
+        close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
       },
       runs = {
         expand_step = { lhs = "o", desc = "expand workflow step" },
@@ -439,6 +440,7 @@ function M.get_default_values()
         react_rocket = { lhs = "<localleader>rr", desc = "add/remove 🚀 reaction" },
         react_laugh = { lhs = "<localleader>rl", desc = "add/remove 😄 reaction" },
         react_confused = { lhs = "<localleader>rc", desc = "add/remove 😕 reaction" },
+        close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
       },
       pull_request = {
         pr_options = { lhs = "<CR>", desc = "show PR options" },
@@ -497,6 +499,7 @@ function M.get_default_values()
         review_resume = { lhs = "<localleader>vr", desc = "resume a pending review for the current PR" },
         resolve_thread = { lhs = "<localleader>rt", desc = "resolve PR thread" },
         unresolve_thread = { lhs = "<localleader>rT", desc = "unresolve PR thread" },
+        close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
       },
       review_thread = {
         goto_issue = { lhs = "<localleader>gi", desc = "navigate to a local repo issue" },
@@ -583,9 +586,11 @@ function M.get_default_values()
         create_discussion = { lhs = "<localleader>dc", desc = "create discussion" },
         contributing_guidelines = { lhs = "<localleader>cg", desc = "view contributing guidelines" },
         open_in_browser = { lhs = "<C-b>", desc = "open repo in browser" },
+        close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
       },
       release = {
         open_in_browser = { lhs = "<C-b>", desc = "open release in browser" },
+        close_buffer = { lhs = "<C-c>", desc = "close this buffer and go back" },
       },
     },
     poll = {

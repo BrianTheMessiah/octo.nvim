@@ -154,11 +154,20 @@ M.EXPRESSION = "%!v:lua.require'octo.ui.keymap-help'.winbar()"
 ---one. Actions the config has that are not named here are drawn after these, sorted,
 ---so a mapping added upstream still shows.
 M.ORDER = {
-  issue = { "add_comment", "add_reply", "react_thumbs_up", "close_issue", "reload", "open_in_browser" },
-  pull = { "add_comment", "add_reply", "checkout_pr", "list_changed_files", "merge_pr", "reload", "open_in_browser" },
-  discussion = { "add_comment", "add_reply", "react_thumbs_up", "reload", "open_in_browser" },
-  repo = { "reload", "open_in_browser", "copy_url" },
-  release = { "reload", "open_in_browser", "copy_url" },
+  issue = { "add_comment", "add_reply", "react_thumbs_up", "close_issue", "reload", "open_in_browser", "close_buffer" },
+  pull = {
+    "add_comment",
+    "add_reply",
+    "checkout_pr",
+    "list_changed_files",
+    "merge_pr",
+    "reload",
+    "open_in_browser",
+    "close_buffer",
+  },
+  discussion = { "add_comment", "add_reply", "react_thumbs_up", "reload", "open_in_browser", "close_buffer" },
+  repo = { "reload", "open_in_browser", "copy_url", "close_buffer" },
+  release = { "reload", "open_in_browser", "copy_url", "close_buffer" },
 }
 
 ---How a buffer kind is named on the bar.

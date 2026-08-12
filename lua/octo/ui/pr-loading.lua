@@ -96,10 +96,19 @@ function M.lines(title, message, count, width)
   }
 end
 
----Whether the float is on screen.
+---Whether the float is on screen, in the tabpage the reader is actually in.
+---
+---A float belongs to the tabpage it was created in, and `Layout:open` runs `tab split`. So
+---a review that shows the float, opens its layout and then shows it again would, on a
+---window-validity check alone, "update" a float stranded in the tabpage the reader has
+---just left -- live, valid, and invisible. Asking about the current tabpage instead is
+---what makes `M.show` reopen it where it can be seen.
 ---@return boolean
 function M.is_open()
-  return win ~= nil and vim.api.nvim_win_is_valid(win)
+  if not (win ~= nil and vim.api.nvim_win_is_valid(win)) then
+    return false
+  end
+  return vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage()
 end
 
 ---The float's window.
@@ -195,16 +204,25 @@ local function open(self_width)
 end
 
 ---Show the float for something being opened, or update it if it is already up.
+---
+---Called again with a different message while the float is up, it replaces the wording
+---without reopening -- which is how a review reports moving from its query to its file
+---fetch as one continuous float rather than two that flicker.
 ---@param repo string the `owner/name` the buffer belongs to
 ---@param kind string the octo node kind
 ---@param id string|integer|nil the number or tag
-function M.show(repo, kind, id)
+---@param message string? what is being waited on, default `fetching…`
+function M.show(repo, kind, id, message)
   if not M.enabled() then
     return
   end
   heading = M.title(repo, kind, id)
-  text = "fetching…"
+  text = message or "fetching…"
   if not M.is_open() then
+    -- `M.hide` first, because "not open" now includes "open in the tabpage we just left":
+    -- that float is a live window and buffer, and opening over it without closing it would
+    -- strand one per review.
+    M.hide()
     tick = 0
     M.highlights()
     open(math.min(M.MAX_WIDTH, math.max(24, vim.o.columns - 4)))

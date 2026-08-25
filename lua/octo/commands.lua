@@ -1649,6 +1649,57 @@ M.add_pr_issue_or_review_thread_comment_reply = function()
   end)
 end
 
+---Put the cursor in your own comment's body, ready to type in it.
+---
+---Octo has always been able to edit a comment -- the buffer IS the editor, and `:w` walks
+---`commentsMetadata` and PATCHes every comment whose body changed. What it has never had is
+---anything that SAYS so: `<localleader>ca` adds, `cd` deletes, `ce` shows the edit history, and
+---the way to change what you wrote was to know that typing over it works. This is that key.
+---
+---In place rather than in a float, deliberately. A float would have to carry the body out, take
+---it back and apply it, which is `do_update_comment`'s job already done once; and a comment
+---being edited would stop being visible in the thread it belongs to, which is most of what makes
+---rewording one easy.
+---
+---Whose comment it is comes from GitHub rather than from comparing logins: `viewerCanUpdate` is
+---on every comment the fragments fetch, and it is the same answer the API will give when the
+---write goes out -- so a refusal here cannot disagree with a refusal there. `viewerDidAuthor` is
+---the fallback for a comment fetched before that field was asked for, which is a table this
+---plugin filled rather than anything GitHub said.
+function M.edit_comment()
+  local buffer = utils.get_current_buffer()
+  if not buffer then
+    return
+  end
+
+  local comment = buffer:get_comment_at_cursor()
+  if not comment then
+    utils.error "The cursor does not seem to be located at any comment"
+    return
+  end
+
+  local mine = comment.viewerCanUpdate
+  if mine == nil then
+    mine = comment.viewerDidAuthor
+  end
+  if not mine then
+    utils.error(("That comment is %s's -- you can only edit your own"):format(comment.author or "somebody else's"))
+    return
+  end
+
+  -- The body's last line, and the column past its last character: `bufferEndLine` is the mark's
+  -- own end row, which is the blank the writer leaves under a comment, so the line above it is
+  -- the last one the reader wrote. A cursor on the blank would type OUTSIDE the extmark and the
+  -- save would not see the change at all.
+  local last = math.max((comment.bufferEndLine or 1) - 1, comment.bufferStartLine or 1)
+  local total = vim.api.nvim_buf_line_count(buffer.bufnr)
+  last = math.min(last, total)
+  local text = vim.api.nvim_buf_get_lines(buffer.bufnr, last - 1, last, false)[1] or ""
+  pcall(vim.api.nvim_win_set_cursor, 0, { last, #text })
+  vim.cmd.startinsert { bang = true }
+  utils.info "Editing your comment -- :w sends it to GitHub"
+end
+
 function M.delete_comment()
   local buffer = utils.get_current_buffer()
   if not buffer then

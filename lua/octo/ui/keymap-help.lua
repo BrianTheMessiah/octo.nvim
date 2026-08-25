@@ -154,9 +154,25 @@ M.EXPRESSION = "%!v:lua.require'octo.ui.keymap-help'.winbar()"
 ---one. Actions the config has that are not named here are drawn after these, sorted,
 ---so a mapping added upstream still shows.
 M.ORDER = {
-  issue = { "add_comment", "add_reply", "react_thumbs_up", "close_issue", "reload", "open_in_browser", "close_buffer" },
-  pull = {
+  issue = {
     "add_comment",
+    "edit_comment",
+    "add_reply",
+    "react_thumbs_up",
+    "close_issue",
+    "reload",
+    "open_in_browser",
+    "close_buffer",
+  },
+  -- `review_start` first, and that is the whole of a reported gap rather than a preference. It
+  -- was already in this list -- every mapping the config has that is not named here is appended,
+  -- sorted -- but 42nd out of 47, which on a truncated bar is never and in the float is a
+  -- haystack. Starting a review is the thing a pull request buffer is opened FOR.
+  pull = {
+    "review_start",
+    "review_resume",
+    "add_comment",
+    "edit_comment",
     "add_reply",
     "checkout_pr",
     "list_changed_files",
@@ -165,7 +181,28 @@ M.ORDER = {
     "open_in_browser",
     "close_buffer",
   },
-  discussion = { "add_comment", "add_reply", "react_thumbs_up", "reload", "open_in_browser", "close_buffer" },
+  discussion = {
+    "add_comment",
+    "edit_comment",
+    "add_reply",
+    "react_thumbs_up",
+    "reload",
+    "open_in_browser",
+    "close_buffer",
+  },
+  -- A review thread had no order at all, so its keys were drawn alphabetically -- which put
+  -- `add_suggestion` third and `resolve_thread` twentieth on the one surface where resolving is
+  -- the point. These are what a reader does IN a thread, in the order they do them.
+  review_thread = {
+    "add_reply",
+    "edit_comment",
+    "add_suggestion",
+    "resolve_thread",
+    "unresolve_thread",
+    "select_next_entry",
+    "select_prev_entry",
+    "close_review_tab",
+  },
   repo = { "reload", "open_in_browser", "copy_url", "close_buffer" },
   release = { "reload", "open_in_browser", "copy_url", "close_buffer" },
 }

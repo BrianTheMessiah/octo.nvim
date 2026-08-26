@@ -31,7 +31,9 @@ M.viewed_state_map = {
 M.deployed_state_map = {
   ABANDONED = { "Abandoned", "OctoBubbleRed" },
   ACTIVE = { "Active", "OctoBubbleGreen" },
-  DESTROYED = { "Destroyed", "OctoBubbleGray" },
+  -- Grey, not Gray: `octo.ui.colors` spells the group OctoBubbleGrey, and the Gray
+  -- spelling names a group nothing defines, which renders as plain Normal text.
+  DESTROYED = { "Destroyed", "OctoBubbleGrey" },
   ERROR = { "Error", "OctoBubbleRed" },
   FAILURE = { "Failure", "OctoBubbleRed" },
   INACTIVE = { "Inactive", "OctoBubbleGrey" },
@@ -70,11 +72,11 @@ M.state_hl_map = {
 
 M.state_icon_map = {
   MERGED = "⇌ ",
-  CLOSED = "⚑ ",
-  OPEN = "⚐ ",
+  CLOSED = "󰈻 ",
+  OPEN = "󰈽 ",
   APPROVED = "✓ ",
   CHANGES_REQUESTED = "± ",
-  COMMENTED = "☷ ",
+  COMMENTED = " ",
   DISMISSED = " ",
   PENDING = " ",
   REVIEW_REQUIRED = " ",
@@ -181,14 +183,14 @@ end
 
 ---@type table<octo.ReactionContent, string>
 M.reaction_map = {
-  ["THUMBS_UP"] = "👍 ",
-  ["THUMBS_DOWN"] = "👎 ",
-  ["LAUGH"] = "😄 ",
-  ["HOORAY"] = "🎉 ",
-  ["CONFUSED"] = "😕 ",
-  ["HEART"] = "❤️ ",
-  ["ROCKET"] = "🚀 ",
-  ["EYES"] = "👀 ",
+  ["THUMBS_UP"] = "󰔓 ",
+  ["THUMBS_DOWN"] = "󰔑 ",
+  ["LAUGH"] = "󰱱 ",
+  ["HOORAY"] = "󱁖 ",
+  ["CONFUSED"] = "󱃞 ",
+  ["HEART"] = "󰋑 ",
+  ["ROCKET"] = " ",
+  ["EYES"] = "󰈈 ",
 }
 
 ---@generic TItem
@@ -1928,6 +1930,10 @@ function M.apply_mappings(kind, bufnr)
     end
   end
   require("octo.reviews.help-bar").remember(bufnr, kind)
+  -- Bound here, where every review surface's mappings pass through, rather than on each
+  -- of the four call sites: the diff, the thread, the file panel and the submit window
+  -- all get the same `g?`, and a surface added later cannot forget it.
+  require("octo.reviews.help-bar").offer_float(bufnr, kind)
 end
 
 ---Returns the starting and ending lines to be commented based on the calling context.

@@ -16,6 +16,7 @@ local preview_markdown = require "octo.pickers.fzf-lua.preview_markdown"
 local preview_prefetch = require "octo.pickers.fzf-lua.preview_prefetch"
 local preview_throttle = require "octo.pickers.fzf-lua.preview_throttle"
 local preview_warmer = require "octo.pickers.fzf-lua.preview_warmer"
+local new_pull_request = require "octo.pickers.fzf-lua.new_pull_request"
 local preview_session_cache = require "octo.pickers.fzf-lua.preview_session_cache"
 
 local M = {}
@@ -342,6 +343,19 @@ function M.search(formatted_items)
 
   function previewer:populate_preview_buf(entry_str)
     local tmpbuf = self:get_tmp_buffer()
+
+    -- Before anything reads a number out of the line. The row's fourth field is not one,
+    -- and `preview_cache.key` does not object -- measured: it returns
+    -- `octo_new_pull_request:./.:nil` quite happily. That is the trap. Unguarded, the
+    -- previewer misses on that key and fires a GraphQL request for a repository and
+    -- number that do not exist, every time the cursor lands on the row.
+    if new_pull_request.is(entry_str) then
+      vim.api.nvim_buf_set_lines(tmpbuf, 0, -1, false, new_pull_request.preview_lines())
+      self:set_preview_buf(tmpbuf)
+      self.win:update_preview_scrollbar()
+      return
+    end
+
     local match = string.gmatch(entry_str, "[^%s]+")
     local kind = match()
     local owner = match()
@@ -554,8 +568,8 @@ function M.repo(formatted_repos)
     ---@type string, string
     local stargazer, fork
     if config.values.picker_config.use_emojis then
-      stargazer = string.format("💫: %s", entry.repo.stargazerCount)
-      fork = string.format("🔱: %s", entry.repo.forkCount)
+      stargazer = string.format(": %s", entry.repo.stargazerCount)
+      fork = string.format("󰫢: %s", entry.repo.forkCount)
     else
       stargazer = string.format("s: %s", entry.repo.stargazerCount)
       fork = string.format("f: %s", entry.repo.forkCount)

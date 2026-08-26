@@ -6,12 +6,14 @@ local M = {}
 --- The short name each review context wears on the bar.
 ---
 --- One word, so the keys keep the rest of the line. The four kinds are exactly
---- the ones review mode calls `utils.apply_mappings` with.
+--- the ones review mode calls `utils.apply_mappings` with. The words themselves
+--- live in `keymap_help.LABELS`, where the `g?` float titles itself from, so the
+--- bar and the float name a context with one claim rather than two.
 M.LABELS = {
-  review_diff = "diff",
-  review_thread = "thread",
-  file_panel = "files",
-  submit_win = "submit",
+  review_diff = keymap_help.LABELS.review_diff,
+  review_thread = keymap_help.LABELS.review_thread,
+  file_panel = keymap_help.LABELS.file_panel,
+  submit_win = keymap_help.LABELS.submit_win,
 }
 
 --- The order each context's keys are drawn in, most useful first.
@@ -19,73 +21,16 @@ M.LABELS = {
 --- The bar is truncated to the window it is drawn on, so what comes first is
 --- what survives a narrow window. Actions the config has that are not named
 --- here are drawn after these, sorted, so a mapping added upstream still shows.
+---
+--- The lists are `keymap_help.ORDER`'s own, shared by reference: `g?` opens the
+--- full list the bar truncates, and a float that ordered the same keys
+--- differently would read as a different set. The thread list existed twice
+--- before this, eight entries there and eighteen here, already drifted apart.
 M.ORDER = {
-  review_diff = {
-    "submit_review",
-    "discard_review",
-    "add_review_comment",
-    "add_review_suggestion",
-    "next_thread",
-    "prev_thread",
-    "toggle_viewed",
-    "select_next_entry",
-    "select_prev_entry",
-    "select_next_unviewed_entry",
-    "select_prev_unviewed_entry",
-    "focus_files",
-    "toggle_files",
-    "review_commits",
-    "goto_file",
-    "copy_sha",
-    "select_first_entry",
-    "select_last_entry",
-    "close_review_tab",
-  },
-  review_thread = {
-    "add_comment",
-    "add_reply",
-    "add_suggestion",
-    "resolve_thread",
-    "unresolve_thread",
-    "delete_comment",
-    "next_comment",
-    "prev_comment",
-    "comment_edits",
-    "reference_in_new_issue",
-    "goto_issue",
-    "select_next_entry",
-    "select_prev_entry",
-    "select_next_unviewed_entry",
-    "select_prev_unviewed_entry",
-    "select_first_entry",
-    "select_last_entry",
-    "close_review_tab",
-  },
-  file_panel = {
-    "select_entry",
-    "next_entry",
-    "prev_entry",
-    "toggle_viewed",
-    "submit_review",
-    "discard_review",
-    "refresh_files",
-    "select_next_unviewed_entry",
-    "select_prev_unviewed_entry",
-    "toggle_files",
-    "focus_files",
-    "review_commits",
-    "select_next_entry",
-    "select_prev_entry",
-    "select_first_entry",
-    "select_last_entry",
-    "close_review_tab",
-  },
-  submit_win = {
-    "approve_review",
-    "comment_review",
-    "request_changes",
-    "close_review_tab",
-  },
+  review_diff = keymap_help.ORDER.review_diff,
+  review_thread = keymap_help.ORDER.review_thread,
+  file_panel = keymap_help.ORDER.file_panel,
+  submit_win = keymap_help.ORDER.submit_win,
 }
 
 M.CUT = keymap_help.CUT
@@ -134,6 +79,25 @@ function M.kind(bufnr)
   end
   local kind = vim.b[bufnr][M.VARIABLE]
   return M.LABELS[kind] and kind or nil
+end
+
+--- Binds the key that opens the full key list on one review buffer.
+---
+--- The bar truncates at the window's edge, so any key past the cut is a key nobody
+--- can discover from it. Asked for directly: "have just a keymap in the review stage
+--- to display the list of commands available". `g?` opens the same float an octo
+--- buffer gets -- one help mechanism, not a second one -- listing every key the
+--- context has, in the bar's own order. Contexts outside review mode are ignored;
+--- `keymap_help.attach` already serves those buffers.
+---@param bufnr integer the buffer the review context's mappings were applied to
+---@param kind string the mapping kind they came from
+function M.offer_float(bufnr, kind)
+  if not M.LABELS[kind] or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.keymap.set("n", keymap_help.HELP_KEY, function()
+    keymap_help.float(kind)
+  end, { buffer = bufnr, silent = true, noremap = true, desc = "Octo: show the keys this review surface has" })
 end
 
 --- The keys that fit, joined, each one drawn whole.
@@ -215,7 +179,16 @@ function M.winbar()
     return ""
   end
 
-  return ("%%#%s#%s"):format(M.GROUP, M.line(kind, vim.api.nvim_win_get_width(win)))
+  -- The keys past the bar's cut can only be discovered through the float, so the tail
+  -- names the key that opens it -- reserved out of the width before the keys are laid
+  -- out and cut last, the same deal `keymap_help.bar_line` gives its own section.
+  local width = vim.api.nvim_win_get_width(win)
+  local section = ("  %s %s"):format(vim.fn.nr2char(0x2502), keymap_help.section())
+  local section_width = vim.fn.strdisplaywidth(section)
+  if width <= section_width then
+    return ("%%#%s#%s"):format(M.GROUP, M.truncate(section, width))
+  end
+  return ("%%#%s#%s%s"):format(M.GROUP, M.line(kind, width - section_width), section)
 end
 
 --- Dims the bar, unless something has already said how it should look.

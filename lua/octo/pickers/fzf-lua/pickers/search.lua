@@ -1,5 +1,6 @@
 ---@diagnostic disable
 local fzf_actions = require "octo.pickers.fzf-lua.pickers.fzf_actions"
+local new_pull_request = require "octo.pickers.fzf-lua.new_pull_request"
 local entry_maker = require "octo.pickers.fzf-lua.entry_maker"
 local fzf = require "fzf-lua"
 local gh = require "octo.gh"
@@ -96,7 +97,7 @@ function M.open_scoped(snapshot, formatted_items, prompt_title, repo)
     M.open_scoped(snapshot, formatted_items, prompt_title, next_repo)
   end
 
-  fzf.fzf_exec(M.scoped_lines(snapshot, repo), {
+  fzf.fzf_exec(new_pull_request.prepend(M.scoped_lines(snapshot, repo)), {
     prompt = picker_utils.get_prompt(repo_scope.prompt(prompt_title, repo)),
     previewer = previewers.search(formatted_items),
     fzf_opts = M.list_fzf_opts(),
@@ -121,6 +122,14 @@ function M.picker(opts)
       ---@param fzf_cb fzf-lua.fzfCb
       function(fzf_cb)
         local co = coroutine.running()
+
+        -- Emitted before any early return: a query that matches nothing, or no query at
+        -- all, still carries the row -- which is the moment it is most wanted, since a
+        -- list that is empty because you have opened nothing is a list you came to in
+        -- order to open one.
+        if new_pull_request.enabled() then
+          fzf_cb(new_pull_request.line())
+        end
 
         if not opts.prompt and utils.is_blank(query) then
           fzf_cb()

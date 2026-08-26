@@ -895,7 +895,7 @@ function M.repos(opts)
           vim.ui.select(repos, {
             prompt = "Select Repository:",
             format_item = function(repo)
-              return string.format("%s ⑂%d ★%d", repo.nameWithOwner, repo.forkCount, repo.stargazerCount)
+              return string.format("%s %d %d", repo.nameWithOwner, repo.forkCount, repo.stargazerCount)
             end,
           }, function(choice)
             if not choice then
@@ -1358,7 +1358,7 @@ function M.search(opts)
                   return string.format("#%d %s", item.number, item.title)
                 elseif typename == "Repository" then
                   return string.format(
-                    "%s ⑂%d ★%d",
+                    "%s %d %d",
                     item.nameWithOwner,
                     item.forkCount or 0,
                     item.stargazerCount or 0

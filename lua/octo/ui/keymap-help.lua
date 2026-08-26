@@ -30,13 +30,35 @@ M.HELP_KEY = "g?"
 ---`<C-g>` is free against every entry in `picker_config.mappings`.
 M.PICKER_HELP_KEY = "<C-g>"
 
+---What an action is called where its own name does not say what it does.
+---
+---A label is derived from the action's name, which works for `add_comment` and does not
+---work for `review_start`: stripping `review` leaves `start`, and `start` beside `resume`
+---in a pull request's key list says nothing about what either one starts. Asked directly:
+---"what does start and resume mean here, please be more specific".
+---
+---What they are, from `reviews/init.lua`: `start` sends `addPullRequestReview` and opens
+---the diff on a review that did not exist a moment ago; `resume` looks for the pending
+---review you already have, and says "No pending reviews found for viewer" when there is
+---none. So one of them makes a review and the other finds yours.
+M.PHRASES = {
+  review_start = "start a new review",
+  review_resume = "reopen your pending review",
+  review_submit = "submit your review",
+  review_discard = "discard your pending review",
+}
+
 ---An action's name as a bar labels it.
 ---
----The word `review` inside an action name is repeated noise on a surface that is
----already the review bar, and is short of room besides.
+---`M.PHRASES` first, for the ones a derived name gets wrong. Otherwise the word `review`
+---inside an action name is repeated noise on a surface that is already the review bar,
+---and is short of room besides.
 ---@param action string the action's name, as the mapping config keys it
 ---@return string
 function M.terse(action)
+  if M.PHRASES[action] then
+    return M.PHRASES[action]
+  end
   local words = {}
   for word in action:gmatch "[^_]+" do
     if word ~= "review" then
@@ -154,9 +176,25 @@ M.EXPRESSION = "%!v:lua.require'octo.ui.keymap-help'.winbar()"
 ---one. Actions the config has that are not named here are drawn after these, sorted,
 ---so a mapping added upstream still shows.
 M.ORDER = {
-  issue = { "add_comment", "add_reply", "react_thumbs_up", "close_issue", "reload", "open_in_browser", "close_buffer" },
-  pull = {
+  issue = {
     "add_comment",
+    "edit_comment",
+    "add_reply",
+    "react_thumbs_up",
+    "close_issue",
+    "reload",
+    "open_in_browser",
+    "close_buffer",
+  },
+  -- `review_start` first, and that is the whole of a reported gap rather than a preference. It
+  -- was already in this list -- every mapping the config has that is not named here is appended,
+  -- sorted -- but 42nd out of 47, which on a truncated bar is never and in the float is a
+  -- haystack. Starting a review is the thing a pull request buffer is opened FOR.
+  pull = {
+    "review_start",
+    "review_resume",
+    "add_comment",
+    "edit_comment",
     "add_reply",
     "checkout_pr",
     "list_changed_files",
@@ -165,12 +203,99 @@ M.ORDER = {
     "open_in_browser",
     "close_buffer",
   },
-  discussion = { "add_comment", "add_reply", "react_thumbs_up", "reload", "open_in_browser", "close_buffer" },
+  discussion = {
+    "add_comment",
+    "edit_comment",
+    "add_reply",
+    "react_thumbs_up",
+    "reload",
+    "open_in_browser",
+    "close_buffer",
+  },
+  -- A review thread had no order at all, so its keys were drawn alphabetically -- which put
+  -- `add_suggestion` third and `resolve_thread` twentieth on the one surface where resolving is
+  -- the point. These are what a reader does IN a thread, in the order they do them.
+  --
+  -- This list and the three below it are also the review bar's: `octo.reviews.help-bar`
+  -- shares them by reference, so the order that survives the bar's truncation and the order
+  -- the `g?` float draws in full cannot disagree. The thread list used to exist twice, eight
+  -- entries here and eighteen there, and the two had already drifted.
+  review_thread = {
+    "add_comment",
+    "add_reply",
+    "edit_comment",
+    "add_suggestion",
+    "resolve_thread",
+    "unresolve_thread",
+    "delete_comment",
+    "next_comment",
+    "prev_comment",
+    "comment_edits",
+    "reference_in_new_issue",
+    "goto_issue",
+    "select_next_entry",
+    "select_prev_entry",
+    "select_next_unviewed_entry",
+    "select_prev_unviewed_entry",
+    "select_first_entry",
+    "select_last_entry",
+    "close_review_tab",
+  },
+  review_diff = {
+    "submit_review",
+    "discard_review",
+    "add_review_comment",
+    "add_review_suggestion",
+    "next_thread",
+    "prev_thread",
+    "toggle_viewed",
+    "select_next_entry",
+    "select_prev_entry",
+    "select_next_unviewed_entry",
+    "select_prev_unviewed_entry",
+    "focus_files",
+    "toggle_files",
+    "review_commits",
+    "goto_file",
+    "copy_sha",
+    "select_first_entry",
+    "select_last_entry",
+    "close_review_tab",
+  },
+  file_panel = {
+    "select_entry",
+    "next_entry",
+    "prev_entry",
+    "toggle_viewed",
+    "submit_review",
+    "discard_review",
+    "refresh_files",
+    "select_next_unviewed_entry",
+    "select_prev_unviewed_entry",
+    "toggle_files",
+    "focus_files",
+    "review_commits",
+    "select_next_entry",
+    "select_prev_entry",
+    "select_first_entry",
+    "select_last_entry",
+    "close_review_tab",
+  },
+  submit_win = {
+    "approve_review",
+    "comment_review",
+    "request_changes",
+    "close_review_tab",
+  },
   repo = { "reload", "open_in_browser", "copy_url", "close_buffer" },
   release = { "reload", "open_in_browser", "copy_url", "close_buffer" },
 }
 
 ---How a buffer kind is named on the bar.
+---
+---The four review kinds carry the same one-word names the review bar wears, shared by
+---reference from `octo.reviews.help-bar`, so the float's title and the bar's opening word
+---are one claim rather than two.
 M.LABELS = {
   issue = "issue",
   pull = "pull",
@@ -179,6 +304,10 @@ M.LABELS = {
   release = "release",
   comment_popup = "comment",
   picker = "picker",
+  review_diff = "diff",
+  review_thread = "thread",
+  file_panel = "files",
+  submit_win = "submit",
 }
 
 ---The `config.values.mappings` key a buffer kind's keys actually sit under.
@@ -204,6 +333,19 @@ M.LITERAL = {
     { action = "cancel", lhs = "q", label = "close, keeping a draft" },
     { action = "cancel_ctrl", lhs = "<C-c>", label = "close, keeping a draft" },
   },
+}
+
+---Entries put at the FRONT of a derived kind's list, for keys no mapping table holds.
+---
+---`:w` is the one that posts what you typed -- octo answers `BufWriteCmd` by sending the
+---comment -- and it is not in `config.values.mappings`, so no surface listed it: a reader
+---who had just written a reply had every key for reacting to it and none for sending it.
+---Asked for directly.
+M.LEADING = {
+  issue = { { action = "save", lhs = ":w", label = "send what you typed to GitHub" } },
+  pull = { { action = "save", lhs = ":w", label = "send what you typed to GitHub" } },
+  discussion = { { action = "save", lhs = ":w", label = "send what you typed to GitHub" } },
+  review_thread = { { action = "save", lhs = ":w", label = "send what you typed to GitHub" } },
 }
 
 ---The keys one kind has, in the order they are drawn.
@@ -240,7 +382,16 @@ function M.entries(kind, handlers)
   end
   handlers = handlers or require "octo.mappings"
   local mappings = config.values.mappings[M.CONFIG_KEY[kind] or kind] or {}
-  return M.entries_from(mappings, M.ORDER[kind] or {}, handlers)
+  local entries = {}
+  for _, entry in ipairs(M.LEADING[kind] or {}) do
+    entries[#entries + 1] = {
+      action = entry.action,
+      lhs = M.pretty_lhs(entry.lhs),
+      label = entry.label,
+    }
+  end
+  vim.list_extend(entries, M.entries_from(mappings, M.ORDER[kind] or {}, handlers))
+  return entries
 end
 
 ---The surfaces a reviewer meets a pending comment on.
@@ -507,8 +658,95 @@ function M.highlight()
   end
 end
 
----Hangs the bar on a window and binds the key that opens the float.
----@param win integer the window to draw the bar on
+---Puts the bar on one window, or takes it off, according to what that window is showing.
+---
+---The bar belongs to the BUFFER and the winbar belongs to the window, and this is what
+---reconciles the two. It only ever clears a winbar that is this module's own expression,
+---so barbecue's breadcrumb, the switchboard's hint and anything else drawn up there is
+---left alone.
+---@param win integer the window to reconcile
+---@return boolean dressed whether the window came away wearing the bar
+function M.dress(win)
+  if not vim.api.nvim_win_is_valid(win) then
+    return false
+  end
+  local current = vim.api.nvim_get_option_value("winbar", { win = win, scope = "local" })
+  if M.kind(vim.api.nvim_win_get_buf(win)) then
+    M.highlight()
+    if current ~= M.EXPRESSION then
+      vim.api.nvim_set_option_value("winbar", M.EXPRESSION, { win = win, scope = "local" })
+    end
+    return true
+  end
+  if current == M.EXPRESSION then
+    vim.api.nvim_set_option_value("winbar", "", { win = win, scope = "local" })
+  end
+  return false
+end
+
+---The events after which a window is reconciled with what it is showing.
+---
+---The last four are not about following a buffer between windows at all -- they are about
+---barbecue.nvim, which draws a file breadcrumb into this same winbar and redraws it on
+---`WinResized`, `BufWinEnter`, `CursorMoved` and `InsertLeave`. Only the second of those was
+---shared, so the bar survived a split and lost to the first cursor movement: measured with
+---barbecue really loaded and its shipped config, the winbar went from this module's expression
+---to `%#barbecue_normal# %#barbecue_dirname#/%…` on `CursorMoved`, `WinResized`,
+---`InsertLeave` and `WinScrolled` alike.
+---
+---Which is why it looked like a first-startup problem and was reported as one. barbecue is
+---`VeryLazy`, so on a cold start octo dresses the window first and barbecue loads afterwards
+---and wipes it; on a later visit `BufEnter` puts it back, so the bar was there every time the
+---reader came back to a pull request and missing the first time they opened one.
+---
+---`lua/dbreader/winbar.lua` in the reader's config learnt exactly this and lists exactly these
+---events, with `WinScrolled` for a header that has to stay aligned as the view moves. A winbar
+---belongs to the window and any plugin may write it; the only defence is redrawing after
+---whoever else did.
+M.FOLLOW_EVENTS = {
+  "BufWinEnter",
+  "BufEnter",
+  "WinEnter",
+  "WinNew",
+  "CursorMoved",
+  "WinResized",
+  "WinScrolled",
+  "InsertLeave",
+}
+
+---The augroup holding the follower, so registering it twice replaces it.
+M.FOLLOW_GROUP = "octo_keymap_help_winbar"
+
+---Follow octo buffers between windows, so the bar is wherever one is being read.
+---@return nil
+function M.follow()
+  local group = vim.api.nvim_create_augroup(M.FOLLOW_GROUP, { clear = true })
+  vim.api.nvim_create_autocmd(M.FOLLOW_EVENTS, {
+    group = group,
+    callback = function()
+      M.dress(vim.api.nvim_get_current_win())
+      -- Again on the next tick, because barbecue's own updater is scheduled: on an event both
+      -- react to, its write lands after an inline one and the bar would lose a race it appears
+      -- to win. Doing only the scheduled pass is not the answer either -- it leaves the bar
+      -- absent for a tick, and every synchronous reader of it, this module's own suite
+      -- included, sees nothing. The same pair `dbreader.winbar` settled on.
+      vim.schedule(function()
+        M.dress(vim.api.nvim_get_current_win())
+      end)
+    end,
+    desc = "Octo: keep the keys bar on whichever window is showing an octo buffer",
+  })
+end
+
+---Binds the key that opens the float, and starts the bar following the buffer.
+---
+---The bar used to be hung on `vim.api.nvim_get_current_win()` here and left there. A
+---buffer is configured when GitHub answers, not when the reader looks at it, so the
+---window current at that moment is frequently not the one the pull request ends up in --
+---measured: the window the reader was sitting in got the bar, and the window that then
+---showed the pull request got nothing, which is a pull request with no `g?` hint above
+---it. `win` is still honoured, but only if it is really showing this buffer.
+---@param win integer the window the caller believes is showing the buffer
 ---@param bufnr integer the buffer whose kind the bar describes
 ---@param kind string the mapping kind
 function M.attach(win, bufnr, kind)
@@ -519,9 +757,13 @@ function M.attach(win, bufnr, kind)
   vim.keymap.set("n", M.HELP_KEY, function()
     M.float(kind)
   end, { buffer = bufnr, silent = true, noremap = true, desc = "Octo: show the keys this buffer has" })
-  if vim.api.nvim_win_is_valid(win) then
-    M.highlight()
-    vim.api.nvim_set_option_value("winbar", M.EXPRESSION, { win = win, scope = "local" })
+
+  M.follow()
+  for _, showing in ipairs(vim.fn.win_findbuf(bufnr)) do
+    M.dress(showing)
+  end
+  if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == bufnr then
+    M.dress(win)
   end
 end
 

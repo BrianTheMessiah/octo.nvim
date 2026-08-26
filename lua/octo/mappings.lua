@@ -382,6 +382,9 @@ return {
   delete_comment = function()
     require("octo.commands").delete_comment()
   end,
+  edit_comment = function()
+    require("octo.commands").edit_comment()
+  end,
   comment_edits = function()
     require("octo.commands").comment_edits()
   end,

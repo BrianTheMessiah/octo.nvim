@@ -20,8 +20,11 @@ local M = {}
 ---@field hl string the highlight group the button is drawn in
 
 ---@class octo.ButtonCaps
----@field viewer_can_update boolean? whether the viewer may edit or delete this section
+---@field viewer_can_update boolean? whether the viewer may edit this section
+---@field viewer_can_delete boolean? whether GitHub would accept a delete of this comment
+---@field viewer_did_author boolean? whether the viewer wrote this comment
 ---@field is_resolved boolean? whether a review thread is resolved
+---@field thread_row boolean? whether this buffer already carries a thread row, which owns Send
 
 ---The section kinds that have buttons.
 M.KINDS = {
@@ -64,14 +67,27 @@ local VOCABULARY = {
     { label = "Reply", action = "add_reply" },
     { label = "React", action = "react_thumbs_up" },
     {
+      -- Authorship AND permission, and it used to be permission alone -- which is why a
+      -- Delete sat on comments the reader had not written. `viewerCanUpdate` is GitHub's
+      -- answer to "may this account edit this comment", and for anyone with write access
+      -- to the repository that is *yes on everybody's*: maintainers really can edit and
+      -- delete other people's comments. A button that offers it on every comment in the
+      -- conversation is a destructive action one keystroke from a reader who wanted their
+      -- own. So the offer is narrowed to comments the reader wrote, and the permission is
+      -- still asked, because authorship does not by itself mean GitHub will accept it.
       label = "Delete",
       action = "delete_comment",
       when = function(caps)
-        return caps.viewer_can_update == true
+        return caps.viewer_did_author == true and caps.viewer_can_delete ~= false
       end,
     },
   },
   thread = {
+    -- First, and on the thread's own row rather than only on the footer. A review thread IS
+    -- the box a reviewer writes in, and the key that sends what they wrote belongs against
+    -- it -- asked for that way: "please prioritize adding the write keymap hint to the box in
+    -- octo review".
+    { label = "Send", action = "save" },
     { label = "Reply", action = "add_reply" },
     {
       label = "Resolve",
@@ -90,6 +106,20 @@ local VOCABULARY = {
     { label = "React", action = "react_thumbs_up" },
   },
   footer = {
+    -- What sends a comment you have just typed is `:w` -- octo's own `BufWriteCmd` -- and
+    -- nothing said so anywhere: the rows offered Reply, React and Resolve, and the one key
+    -- that actually posts what you wrote was undocumented on every surface.
+    --
+    -- On the footer for a conversation, where there is no one comment it belongs to, and
+    -- dropped here when the buffer is a review thread -- there it is on the thread's own row,
+    -- against the box being written in, and two Sends for one key is worse than either.
+    {
+      label = "Send",
+      action = "save",
+      when = function(caps)
+        return caps.thread_row ~= true
+      end,
+    },
     { label = "+ New Comment", action = "add_comment" },
     { label = "Reload", action = "reload" },
   },
@@ -97,13 +127,13 @@ local VOCABULARY = {
 
 ---The key an action is bound to in a section kind's mapping table.
 ---
----`edit` has no mapping of its own -- editing a body in octo is done by typing in the
----buffer and saving it -- so it is labelled with the write command instead.
+---`edit` and `save` have no mapping of their own -- writing a body or a comment in octo is
+---done by typing in the buffer and saving it -- so both are labelled with the write command.
 ---@param kind string the section kind
 ---@param action string the action's name
 ---@return string? lhs nil when nothing is bound
 local function key_for(kind, action)
-  if action == "edit" then
+  if action == "edit" or action == "save" then
     return ":w"
   end
   local mappings = config.values.mappings[TABLES[kind]] or {}
@@ -168,6 +198,20 @@ end
 
 local namespace = vim.api.nvim_create_namespace "octo_buttons"
 
+---Chunks appended to the end of a drawn row, or nil for none.
+---
+---There is exactly one caller and it is the reason this exists: the config's comment
+---boxes (`lua/octo_boxes.lua`) close their bottom edge on this row, and the rule that
+---runs from the last button to the edge of the window cannot be drawn from outside it.
+---A rule is virtual text on a buffer line, and a `virt_lines` row is not one -- so the
+---only way anything reaches the end of this row is from inside the row itself.
+---
+---Appended, never inserted: `click()` resolves a press by counting display columns
+---across `drawn[bufnr][anchor].chunks`, so anything added ahead of the buttons would
+---move every one of them out from under the mouse.
+---@type nil|fun(bufnr: integer, anchor: integer, chunks: { [1]: string, [2]: string }[]): { [1]: string, [2]: string }[]|nil
+M.trailer = nil
+
 ---The extmark namespace the button rows are drawn in.
 ---@return integer
 function M.namespace()
@@ -211,6 +255,12 @@ function M.render(bufnr, sections)
       local row = M.rows(section.kind, section.caps)
       local chunks = M.line(row)
       if #chunks > 0 then
+        if M.trailer then
+          local ok_trailer, extra = pcall(M.trailer, bufnr, anchor, chunks)
+          if ok_trailer and type(extra) == "table" then
+            vim.list_extend(chunks, extra)
+          end
+        end
         local ok = pcall(vim.api.nvim_buf_set_extmark, bufnr, namespace, anchor, 0, {
           virt_lines = { chunks },
           virt_lines_above = false,

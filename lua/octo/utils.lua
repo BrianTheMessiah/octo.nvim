@@ -70,11 +70,11 @@ M.state_hl_map = {
 
 M.state_icon_map = {
   MERGED = "⇌ ",
-  CLOSED = "⚑ ",
-  OPEN = "⚐ ",
+  CLOSED = "󰈻 ",
+  OPEN = "󰈽 ",
   APPROVED = "✓ ",
   CHANGES_REQUESTED = "± ",
-  COMMENTED = "☷ ",
+  COMMENTED = " ",
   DISMISSED = " ",
   PENDING = " ",
   REVIEW_REQUIRED = " ",
@@ -181,14 +181,14 @@ end
 
 ---@type table<octo.ReactionContent, string>
 M.reaction_map = {
-  ["THUMBS_UP"] = "👍 ",
-  ["THUMBS_DOWN"] = "👎 ",
-  ["LAUGH"] = "😄 ",
-  ["HOORAY"] = "🎉 ",
-  ["CONFUSED"] = "😕 ",
-  ["HEART"] = "❤️ ",
-  ["ROCKET"] = "🚀 ",
-  ["EYES"] = "👀 ",
+  ["THUMBS_UP"] = "󰔓 ",
+  ["THUMBS_DOWN"] = "󰔑 ",
+  ["LAUGH"] = "󰱱 ",
+  ["HOORAY"] = "󱁖 ",
+  ["CONFUSED"] = "󱃞 ",
+  ["HEART"] = "󰋑 ",
+  ["ROCKET"] = " ",
+  ["EYES"] = "󰈈 ",
 }
 
 ---@generic TItem

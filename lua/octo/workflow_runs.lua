@@ -154,7 +154,7 @@ local function generate_workflow_tree(data)
     expanded = true,
     highlight = nil,
     preIcon = "",
-    icon = "📂",
+    icon = "",
     children = {},
   }
 
@@ -170,7 +170,7 @@ local function generate_workflow_tree(data)
       status = job.status,
       conclusion = job.conclusion,
       preIcon = "",
-      icon = "🛠️",
+      icon = "󱁤",
       children = {},
     }
 
@@ -711,7 +711,7 @@ local function get_job_status(status, conclusion)
   elseif conclusion == "cancelled" then
     return icons.cancelled
   else
-    return "❓"
+    return ""
   end
 end
 
@@ -729,7 +729,7 @@ local function get_step_status(status, conclusion)
   elseif conclusion == "cancelled" then
     return icons.cancelled
   else
-    return "❓"
+    return ""
   end
 end
 
@@ -745,7 +745,7 @@ local function get_workflow_status(status, conclusion)
   elseif conclusion == "skipped" then
     return icons.skipped
   else
-    return "❓"
+    return ""
   end
 end
 

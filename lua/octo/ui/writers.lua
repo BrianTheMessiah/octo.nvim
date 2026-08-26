@@ -352,7 +352,7 @@ function M.write_discussion_poll(bufnr, poll, start_line)
 
   -- Write header and empty lines for options
   local lines = {
-    string.format("📊 Poll: %s", poll.question),
+    string.format("󰐟 Poll: %s", poll.question),
   }
 
   -- Add empty lines for each option (will be overlaid with virtual text)
@@ -1882,7 +1882,7 @@ function M.write_user_profile(bufnr, user, opts)
   if user.location ~= vim.NIL then
     local location_chunk = {
       { " " },
-      { "🏠 " .. user.location },
+      { " " .. user.location },
     }
     max_length = chunk_length(max_length, location_chunk)
     table.insert(chunks, location_chunk)
@@ -1892,7 +1892,7 @@ function M.write_user_profile(bufnr, user, opts)
   if user.company ~= vim.NIL then
     local company_chunk = {
       { " " },
-      { "🏢 " .. user.company },
+      { " " .. user.company },
     }
     max_length = chunk_length(max_length, company_chunk)
     table.insert(chunks, company_chunk)
@@ -1914,7 +1914,7 @@ function M.write_user_profile(bufnr, user, opts)
   if user.twitterUsername ~= vim.NIL then
     local twitter_chunk = {
       { " " },
-      { "🐦 " .. user.twitterUsername },
+      { " " .. user.twitterUsername },
     }
     max_length = chunk_length(max_length, twitter_chunk)
     table.insert(chunks, twitter_chunk)
@@ -1924,7 +1924,7 @@ function M.write_user_profile(bufnr, user, opts)
   if user.websiteUrl ~= vim.NIL then
     local website_chunk = {
       { " " },
-      { "🔗 " .. user.websiteUrl },
+      { " " .. user.websiteUrl },
     }
     max_length = chunk_length(max_length, website_chunk)
     table.insert(chunks, website_chunk)

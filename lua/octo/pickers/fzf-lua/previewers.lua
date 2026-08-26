@@ -568,8 +568,8 @@ function M.repo(formatted_repos)
     ---@type string, string
     local stargazer, fork
     if config.values.picker_config.use_emojis then
-      stargazer = string.format("💫: %s", entry.repo.stargazerCount)
-      fork = string.format("🔱: %s", entry.repo.forkCount)
+      stargazer = string.format(": %s", entry.repo.stargazerCount)
+      fork = string.format("󰫢: %s", entry.repo.forkCount)
     else
       stargazer = string.format("s: %s", entry.repo.stargazerCount)
       fork = string.format("f: %s", entry.repo.forkCount)

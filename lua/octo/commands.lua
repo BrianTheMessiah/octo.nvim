@@ -1678,10 +1678,13 @@ function M.edit_comment()
     return
   end
 
-  local mine = comment.viewerCanUpdate
-  if mine == nil then
-    mine = comment.viewerDidAuthor
-  end
+  -- Authorship, and not `viewerCanUpdate` alone, which is what this asked first. GitHub
+  -- answers that with "may this account edit this comment", and to anyone holding write
+  -- access to the repository it answers yes on EVERY comment -- so the refusal below, whose
+  -- whole message is "you can only edit your own", never fired for a maintainer. The
+  -- permission is still consulted, because a comment the reader wrote in a repository they
+  -- have since lost access to is one GitHub will refuse the write on.
+  local mine = comment.viewerDidAuthor == true and comment.viewerCanUpdate ~= false
   if not mine then
     utils.error(("That comment is %s's -- you can only edit your own"):format(comment.author or "somebody else's"))
     return

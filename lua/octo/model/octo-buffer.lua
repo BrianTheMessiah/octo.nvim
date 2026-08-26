@@ -1127,7 +1127,11 @@ function OctoBuffer:button_sections()
     local _, last = utils.get_extmark_region(self.bufnr, mark)
     if last then
       local last_line = last + 1
-      local caps = { viewer_can_update = metadata.viewerCanUpdate == true }
+      local caps = {
+        viewer_can_update = metadata.viewerCanUpdate == true,
+        viewer_can_delete = metadata.viewerCanDelete ~= false,
+        viewer_did_author = metadata.viewerDidAuthor == true,
+      }
       if kind == "thread" then
         -- A thread's resolved state lives on the thread, not the comment:
         -- commentsMetadata flattens every comment of every thread into one list,

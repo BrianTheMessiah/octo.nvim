@@ -30,13 +30,35 @@ M.HELP_KEY = "g?"
 ---`<C-g>` is free against every entry in `picker_config.mappings`.
 M.PICKER_HELP_KEY = "<C-g>"
 
+---What an action is called where its own name does not say what it does.
+---
+---A label is derived from the action's name, which works for `add_comment` and does not
+---work for `review_start`: stripping `review` leaves `start`, and `start` beside `resume`
+---in a pull request's key list says nothing about what either one starts. Asked directly:
+---"what does start and resume mean here, please be more specific".
+---
+---What they are, from `reviews/init.lua`: `start` sends `addPullRequestReview` and opens
+---the diff on a review that did not exist a moment ago; `resume` looks for the pending
+---review you already have, and says "No pending reviews found for viewer" when there is
+---none. So one of them makes a review and the other finds yours.
+M.PHRASES = {
+  review_start = "start a new review",
+  review_resume = "reopen your pending review",
+  review_submit = "submit your review",
+  review_discard = "discard your pending review",
+}
+
 ---An action's name as a bar labels it.
 ---
----The word `review` inside an action name is repeated noise on a surface that is
----already the review bar, and is short of room besides.
+---`M.PHRASES` first, for the ones a derived name gets wrong. Otherwise the word `review`
+---inside an action name is repeated noise on a surface that is already the review bar,
+---and is short of room besides.
 ---@param action string the action's name, as the mapping config keys it
 ---@return string
 function M.terse(action)
+  if M.PHRASES[action] then
+    return M.PHRASES[action]
+  end
   local words = {}
   for word in action:gmatch "[^_]+" do
     if word ~= "review" then
@@ -544,8 +566,60 @@ function M.highlight()
   end
 end
 
----Hangs the bar on a window and binds the key that opens the float.
----@param win integer the window to draw the bar on
+---Puts the bar on one window, or takes it off, according to what that window is showing.
+---
+---The bar belongs to the BUFFER and the winbar belongs to the window, and this is what
+---reconciles the two. It only ever clears a winbar that is this module's own expression,
+---so barbecue's breadcrumb, the switchboard's hint and anything else drawn up there is
+---left alone.
+---@param win integer the window to reconcile
+---@return boolean dressed whether the window came away wearing the bar
+function M.dress(win)
+  if not vim.api.nvim_win_is_valid(win) then
+    return false
+  end
+  local current = vim.api.nvim_get_option_value("winbar", { win = win, scope = "local" })
+  if M.kind(vim.api.nvim_win_get_buf(win)) then
+    M.highlight()
+    if current ~= M.EXPRESSION then
+      vim.api.nvim_set_option_value("winbar", M.EXPRESSION, { win = win, scope = "local" })
+    end
+    return true
+  end
+  if current == M.EXPRESSION then
+    vim.api.nvim_set_option_value("winbar", "", { win = win, scope = "local" })
+  end
+  return false
+end
+
+---The events after which a window is reconciled with what it is showing.
+M.FOLLOW_EVENTS = { "BufWinEnter", "BufEnter", "WinEnter", "WinNew" }
+
+---The augroup holding the follower, so registering it twice replaces it.
+M.FOLLOW_GROUP = "octo_keymap_help_winbar"
+
+---Follow octo buffers between windows, so the bar is wherever one is being read.
+---@return nil
+function M.follow()
+  local group = vim.api.nvim_create_augroup(M.FOLLOW_GROUP, { clear = true })
+  vim.api.nvim_create_autocmd(M.FOLLOW_EVENTS, {
+    group = group,
+    callback = function()
+      M.dress(vim.api.nvim_get_current_win())
+    end,
+    desc = "Octo: keep the keys bar on whichever window is showing an octo buffer",
+  })
+end
+
+---Binds the key that opens the float, and starts the bar following the buffer.
+---
+---The bar used to be hung on `vim.api.nvim_get_current_win()` here and left there. A
+---buffer is configured when GitHub answers, not when the reader looks at it, so the
+---window current at that moment is frequently not the one the pull request ends up in --
+---measured: the window the reader was sitting in got the bar, and the window that then
+---showed the pull request got nothing, which is a pull request with no `g?` hint above
+---it. `win` is still honoured, but only if it is really showing this buffer.
+---@param win integer the window the caller believes is showing the buffer
 ---@param bufnr integer the buffer whose kind the bar describes
 ---@param kind string the mapping kind
 function M.attach(win, bufnr, kind)
@@ -556,9 +630,13 @@ function M.attach(win, bufnr, kind)
   vim.keymap.set("n", M.HELP_KEY, function()
     M.float(kind)
   end, { buffer = bufnr, silent = true, noremap = true, desc = "Octo: show the keys this buffer has" })
-  if vim.api.nvim_win_is_valid(win) then
-    M.highlight()
-    vim.api.nvim_set_option_value("winbar", M.EXPRESSION, { win = win, scope = "local" })
+
+  M.follow()
+  for _, showing in ipairs(vim.fn.win_findbuf(bufnr)) do
+    M.dress(showing)
+  end
+  if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == bufnr then
+    M.dress(win)
   end
 end
 

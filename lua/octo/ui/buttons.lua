@@ -100,6 +100,13 @@ local VOCABULARY = {
     { label = "React", action = "react_thumbs_up" },
   },
   footer = {
+    -- First, and on the footer rather than on each comment. What sends a comment you have
+    -- just typed is `:w` -- octo's own `BufWriteCmd` -- and nothing said so anywhere: the
+    -- rows offered Reply, React and Resolve, and the one key that actually posts what you
+    -- wrote was undocumented on every surface. One per buffer, because `:w` sends whatever
+    -- is pending wherever the cursor is, so a copy under each comment would be three
+    -- buttons for one action.
+    { label = "Send", action = "save" },
     { label = "+ New Comment", action = "add_comment" },
     { label = "Reload", action = "reload" },
   },
@@ -107,13 +114,13 @@ local VOCABULARY = {
 
 ---The key an action is bound to in a section kind's mapping table.
 ---
----`edit` has no mapping of its own -- editing a body in octo is done by typing in the
----buffer and saving it -- so it is labelled with the write command instead.
+---`edit` and `save` have no mapping of their own -- writing a body or a comment in octo is
+---done by typing in the buffer and saving it -- so both are labelled with the write command.
 ---@param kind string the section kind
 ---@param action string the action's name
 ---@return string? lhs nil when nothing is bound
 local function key_for(kind, action)
-  if action == "edit" then
+  if action == "edit" or action == "save" then
     return ":w"
   end
   local mappings = config.values.mappings[TABLES[kind]] or {}

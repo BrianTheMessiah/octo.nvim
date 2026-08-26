@@ -1165,10 +1165,12 @@ function OctoBuffer:button_sections()
     add(metadata, self:isReviewThread() and "thread" or "comment")
   end
 
+  -- The footer is told whether a thread row is already on screen, because both of them would
+  -- otherwise offer Send and one key wants one button.
   sections[#sections + 1] = {
     kind = "footer",
     last_line = vim.api.nvim_buf_line_count(self.bufnr),
-    caps = {},
+    caps = { thread_row = self:isReviewThread() },
   }
 
   return sections

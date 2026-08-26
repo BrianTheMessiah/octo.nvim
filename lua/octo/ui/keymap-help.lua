@@ -265,6 +265,19 @@ M.LITERAL = {
   },
 }
 
+---Entries put at the FRONT of a derived kind's list, for keys no mapping table holds.
+---
+---`:w` is the one that posts what you typed -- octo answers `BufWriteCmd` by sending the
+---comment -- and it is not in `config.values.mappings`, so no surface listed it: a reader
+---who had just written a reply had every key for reacting to it and none for sending it.
+---Asked for directly.
+M.LEADING = {
+  issue = { { action = "save", lhs = ":w", label = "send what you typed to GitHub" } },
+  pull = { { action = "save", lhs = ":w", label = "send what you typed to GitHub" } },
+  discussion = { { action = "save", lhs = ":w", label = "send what you typed to GitHub" } },
+  review_thread = { { action = "save", lhs = ":w", label = "send what you typed to GitHub" } },
+}
+
 ---The keys one kind has, in the order they are drawn.
 ---@param kind string a key of `M.ORDER`, or any mappings table name
 ---@param handlers table<string, function>|nil the action handlers; octo's own when omitted
@@ -299,7 +312,16 @@ function M.entries(kind, handlers)
   end
   handlers = handlers or require "octo.mappings"
   local mappings = config.values.mappings[M.CONFIG_KEY[kind] or kind] or {}
-  return M.entries_from(mappings, M.ORDER[kind] or {}, handlers)
+  local entries = {}
+  for _, entry in ipairs(M.LEADING[kind] or {}) do
+    entries[#entries + 1] = {
+      action = entry.action,
+      lhs = M.pretty_lhs(entry.lhs),
+      label = entry.label,
+    }
+  end
+  vim.list_extend(entries, M.entries_from(mappings, M.ORDER[kind] or {}, handlers))
+  return entries
 end
 
 ---The surfaces a reviewer meets a pending comment on.

@@ -18,6 +18,12 @@ local vim = vim
 
 local M = {}
 
+---The `User` pattern fired after a buffer's decorations are drawn.
+---
+---A name and not a literal at the call site, so a consumer matches on the same string this
+---module fires -- `require("octo.model.octo-buffer").RENDERED_EVENT`.
+M.RENDERED_EVENT = "OctoBufferRendered"
+
 ---@alias octo.NodeKind "issue" | "pull" | "discussion" | "repo" | "release"
 
 ---@class OctoBuffer
@@ -655,10 +661,11 @@ function OctoBuffer:do_add_thread_comment(comment_metadata, done)
               local thread_start = extmark[1]
               -- update extmark
               vim.api.nvim_buf_del_extmark(self.bufnr, constants.OCTO_THREAD_NS, tonumber(mark_id) --[[@as integer]])
-              local thread_mark_id = vim.api.nvim_buf_set_extmark(self.bufnr, constants.OCTO_THREAD_NS, thread_start, 0, {
-                end_line = comment_end + 2,
-                end_col = 0,
-              })
+              local thread_mark_id =
+                vim.api.nvim_buf_set_extmark(self.bufnr, constants.OCTO_THREAD_NS, thread_start, 0, {
+                  end_line = comment_end + 2,
+                  end_col = 0,
+                })
               self.threadsMetadata[tostring(thread_mark_id)] = self.threadsMetadata[tostring(mark_id)]
               self.threadsMetadata[tostring(mark_id)] = nil
             end
@@ -1181,6 +1188,19 @@ function OctoBuffer:render_decorations()
   end
   markdown.render_regions(self.bufnr, self:markdown_regions())
   buttons.render(self.bufnr, self:button_sections())
+  -- Announced, so decoration that is not octo's own has something to hang off.
+  --
+  -- There was no such event, and every consumer was left guessing at octo's render from
+  -- Neovim's own: `BufWinEnter` fires before GitHub has answered, and `TextChanged` fires
+  -- only for the buffer that is CURRENT -- so a review thread rendered while the reader was
+  -- somewhere else announced nothing at all, and the config's comment boxes appeared on it
+  -- only once the reader typed. Fired here because this is the end of every render path:
+  -- render_issue, render_threads, render_repo and render_release all finish in this function.
+  pcall(vim.api.nvim_exec_autocmds, "User", {
+    pattern = M.RENDERED_EVENT,
+    modeline = false,
+    data = { buf = self.bufnr, kind = self.kind },
+  })
 end
 
 ---Stops and releases this buffer's markdown debounce timer, if it has one.

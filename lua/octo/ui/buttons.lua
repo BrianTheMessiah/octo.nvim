@@ -24,6 +24,7 @@ local M = {}
 ---@field viewer_can_delete boolean? whether GitHub would accept a delete of this comment
 ---@field viewer_did_author boolean? whether the viewer wrote this comment
 ---@field is_resolved boolean? whether a review thread is resolved
+---@field thread_row boolean? whether this buffer already carries a thread row, which owns Send
 
 ---The section kinds that have buttons.
 M.KINDS = {
@@ -82,6 +83,11 @@ local VOCABULARY = {
     },
   },
   thread = {
+    -- First, and on the thread's own row rather than only on the footer. A review thread IS
+    -- the box a reviewer writes in, and the key that sends what they wrote belongs against
+    -- it -- asked for that way: "please prioritize adding the write keymap hint to the box in
+    -- octo review".
+    { label = "Send", action = "save" },
     { label = "Reply", action = "add_reply" },
     {
       label = "Resolve",
@@ -100,13 +106,20 @@ local VOCABULARY = {
     { label = "React", action = "react_thumbs_up" },
   },
   footer = {
-    -- First, and on the footer rather than on each comment. What sends a comment you have
-    -- just typed is `:w` -- octo's own `BufWriteCmd` -- and nothing said so anywhere: the
-    -- rows offered Reply, React and Resolve, and the one key that actually posts what you
-    -- wrote was undocumented on every surface. One per buffer, because `:w` sends whatever
-    -- is pending wherever the cursor is, so a copy under each comment would be three
-    -- buttons for one action.
-    { label = "Send", action = "save" },
+    -- What sends a comment you have just typed is `:w` -- octo's own `BufWriteCmd` -- and
+    -- nothing said so anywhere: the rows offered Reply, React and Resolve, and the one key
+    -- that actually posts what you wrote was undocumented on every surface.
+    --
+    -- On the footer for a conversation, where there is no one comment it belongs to, and
+    -- dropped here when the buffer is a review thread -- there it is on the thread's own row,
+    -- against the box being written in, and two Sends for one key is worse than either.
+    {
+      label = "Send",
+      action = "save",
+      when = function(caps)
+        return caps.thread_row ~= true
+      end,
+    },
     { label = "+ New Comment", action = "add_comment" },
     { label = "Reload", action = "reload" },
   },

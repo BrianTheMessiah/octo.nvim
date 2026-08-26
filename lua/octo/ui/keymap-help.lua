@@ -215,14 +215,76 @@ M.ORDER = {
   -- A review thread had no order at all, so its keys were drawn alphabetically -- which put
   -- `add_suggestion` third and `resolve_thread` twentieth on the one surface where resolving is
   -- the point. These are what a reader does IN a thread, in the order they do them.
+  --
+  -- This list and the three below it are also the review bar's: `octo.reviews.help-bar`
+  -- shares them by reference, so the order that survives the bar's truncation and the order
+  -- the `g?` float draws in full cannot disagree. The thread list used to exist twice, eight
+  -- entries here and eighteen there, and the two had already drifted.
   review_thread = {
+    "add_comment",
     "add_reply",
     "edit_comment",
     "add_suggestion",
     "resolve_thread",
     "unresolve_thread",
+    "delete_comment",
+    "next_comment",
+    "prev_comment",
+    "comment_edits",
+    "reference_in_new_issue",
+    "goto_issue",
     "select_next_entry",
     "select_prev_entry",
+    "select_next_unviewed_entry",
+    "select_prev_unviewed_entry",
+    "select_first_entry",
+    "select_last_entry",
+    "close_review_tab",
+  },
+  review_diff = {
+    "submit_review",
+    "discard_review",
+    "add_review_comment",
+    "add_review_suggestion",
+    "next_thread",
+    "prev_thread",
+    "toggle_viewed",
+    "select_next_entry",
+    "select_prev_entry",
+    "select_next_unviewed_entry",
+    "select_prev_unviewed_entry",
+    "focus_files",
+    "toggle_files",
+    "review_commits",
+    "goto_file",
+    "copy_sha",
+    "select_first_entry",
+    "select_last_entry",
+    "close_review_tab",
+  },
+  file_panel = {
+    "select_entry",
+    "next_entry",
+    "prev_entry",
+    "toggle_viewed",
+    "submit_review",
+    "discard_review",
+    "refresh_files",
+    "select_next_unviewed_entry",
+    "select_prev_unviewed_entry",
+    "toggle_files",
+    "focus_files",
+    "review_commits",
+    "select_next_entry",
+    "select_prev_entry",
+    "select_first_entry",
+    "select_last_entry",
+    "close_review_tab",
+  },
+  submit_win = {
+    "approve_review",
+    "comment_review",
+    "request_changes",
     "close_review_tab",
   },
   repo = { "reload", "open_in_browser", "copy_url", "close_buffer" },
@@ -230,6 +292,10 @@ M.ORDER = {
 }
 
 ---How a buffer kind is named on the bar.
+---
+---The four review kinds carry the same one-word names the review bar wears, shared by
+---reference from `octo.reviews.help-bar`, so the float's title and the bar's opening word
+---are one claim rather than two.
 M.LABELS = {
   issue = "issue",
   pull = "pull",
@@ -238,6 +304,10 @@ M.LABELS = {
   release = "release",
   comment_popup = "comment",
   picker = "picker",
+  review_diff = "diff",
+  review_thread = "thread",
+  file_panel = "files",
+  submit_win = "submit",
 }
 
 ---The `config.values.mappings` key a buffer kind's keys actually sit under.

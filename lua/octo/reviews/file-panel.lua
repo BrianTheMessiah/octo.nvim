@@ -269,8 +269,11 @@ function FilePanel:render()
     local diffstat = utils.diffstat(file.stats)
     ---@type integer
     max_changes_length = math.max(max_changes_length, string.len(diffstat.total))
+    -- Display columns, not bytes: the padding this feeds lines the thread-count bubbles
+    -- up into one column, and a path with a multibyte character in it is more bytes than
+    -- columns, which pushed every bubble after it out of the column.
     ---@type integer
-    max_path_length = math.max(max_path_length, string.len(file.path))
+    max_path_length = math.max(max_path_length, vim.fn.strdisplaywidth(file.path))
   end
 
   for _, file in ipairs(self.files) do
@@ -281,23 +284,27 @@ function FilePanel:render()
     if file.stats then
       local diffstat = utils.diffstat(file.stats)
 
+      -- Measured off the glyph rather than written down as a number: these ranges are bytes,
+      -- and a literal 3 is only correct for as long as nobody swaps the square for a glyph
+      -- encoded wider -- which is exactly what happened to the viewed-state icon below.
+      local square = "■"
       local file_changes_length = string.len(diffstat.total)
       s = string.rep(" ", max_changes_length - file_changes_length) .. diffstat.total .. " "
       offset = #s
       if diffstat.additions > 0 then
-        s = s .. string.rep("■", diffstat.additions)
-        add_hl("OctoDiffstatAdditions", line_idx, offset, offset + (3 * diffstat.additions))
-        offset = offset + (3 * diffstat.additions)
+        s = s .. string.rep(square, diffstat.additions)
+        add_hl("OctoDiffstatAdditions", line_idx, offset, offset + (#square * diffstat.additions))
+        offset = offset + (#square * diffstat.additions)
       end
       if diffstat.deletions > 0 then
-        s = s .. string.rep("■", diffstat.deletions)
-        add_hl("OctoDiffstatDeletions", line_idx, offset, offset + (3 * diffstat.deletions))
-        offset = offset + (3 * diffstat.deletions)
+        s = s .. string.rep(square, diffstat.deletions)
+        add_hl("OctoDiffstatDeletions", line_idx, offset, offset + (#square * diffstat.deletions))
+        offset = offset + (#square * diffstat.deletions)
       end
       if diffstat.neutral > 0 then
-        s = s .. string.rep("■", diffstat.neutral)
-        add_hl("OctoDiffstatNeutral", line_idx, offset, offset + (3 * diffstat.neutral))
-        offset = offset + (3 * diffstat.neutral)
+        s = s .. string.rep(square, diffstat.neutral)
+        add_hl("OctoDiffstatNeutral", line_idx, offset, offset + (#square * diffstat.neutral))
+        offset = offset + (#square * diffstat.neutral)
       end
     end
 
@@ -313,7 +320,10 @@ function FilePanel:render()
     local viewerViewedStateIcon = utils.viewed_state_map[file.viewed_state].icon
     local viewerViewedStateHl = utils.viewed_state_map[file.viewed_state].hl
     s = s .. " " .. viewerViewedStateIcon
-    add_hl(viewerViewedStateHl, line_idx, offset + 1, offset + 4)
+    -- The icon's own byte length, not a constant: `offset + 4` was written for a 3-byte
+    -- icon, and the viewed-state icons are 4-byte Nerd Font codepoints now, so the fixed
+    -- range ended one byte inside the glyph rather than on a character boundary.
+    add_hl(viewerViewedStateHl, line_idx, offset + 1, offset + 1 + #viewerViewedStateIcon)
     offset = #s
 
     -- icon
@@ -329,7 +339,7 @@ function FilePanel:render()
     if active > 0 or resolved > 0 or pending > 0 or outdated > 0 then
       -- white space to align count columns
       offset = #s + 1
-      s = s .. string.rep(" ", max_path_length + 1 - string.len(file.path))
+      s = s .. string.rep(" ", max_path_length + 1 - vim.fn.strdisplaywidth(file.path))
     end
     local segments = {
       { count = active, prefix = "active: ", center_hl = "OctoBubbleBlue", delimiter_hl = "OctoBubbleDelimiterBlue" },

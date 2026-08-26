@@ -342,7 +342,7 @@ function M.get_default_values()
         pending = "󰥔",
         in_progress = "󰦖",
         failed = "",
-        succeeded = "",
+        succeeded = "",
         skipped = "",
         cancelled = "✖",
       },

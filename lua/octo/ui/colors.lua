@@ -26,6 +26,10 @@ local function get_hl_groups()
     Yellow = { fg = colors.yellow },
     Blue = { fg = colors.blue },
     Grey = { fg = colors.grey },
+    -- `config.lua` draws the `not_planned` and `duplicate` timeline icons in `OctoWhite`, and
+    -- nothing ever defined it -- so those two icons fell back to `Normal` while every other
+    -- state icon carried a colour. Found by walking every group the fork references.
+    White = { fg = colors.white },
 
     GreenFloat = { fg = colors.dark_green, bg = float_bg },
     RedFloat = { fg = colors.dark_red, bg = float_bg },
@@ -80,7 +84,11 @@ local function get_hl_links()
     StatusModified = "OctoBlue",
     StatusRenamed = "OctoBlue",
     StatusCopied = "OctoBlue",
-    StatusTypeChange = "OctoBlue",
+    -- `StatusTypeChanged`, with the `d`: `reviews/renderer.lua` maps a `T` status to
+    -- `OctoStatusTypeChanged`, and this was one letter short of it -- so a file whose TYPE
+    -- changed rendered with no colour at all. Found by walking every group the fork
+    -- references and measuring which of them resolve.
+    StatusTypeChanged = "OctoBlue",
     StatusUnmerged = "OctoBlue",
     StatusUnknown = "OctoYellow",
     StatusDeleted = "OctoRed",
@@ -146,21 +154,61 @@ local function get_hl_links()
   }
 end
 
+---Whether a group is already carrying a definition worth leaving alone.
+---
+---`hlexists` alone is not that question, and the difference is the whole of a reported bug.
+---`hi clear` -- which loading a colourscheme performs -- leaves every group EXISTING and
+---EMPTY: measured directly, `hlexists` stays 1 while `nvim_get_hl` comes back `{}`. So a
+---guard on existence alone never re-defines a group a colourscheme has just emptied, and
+---everything octo draws in it falls back to `Normal`.
+---
+---What a reader saw: a file panel whose diffstat was five identical white squares whatever
+---the counts, and count bubbles whose two half-circle caps and digit were all one colour --
+---an oval with a seam. Both are this, and neither is about the glyphs.
+---
+---It was intermittent because it is a load-order race: octo and the colourscheme are both
+---eager, and whichever runs second wins. Traced over five identical startups with a shim on
+---`nvim_set_hl`: twice octo ran first and was wiped, three times it ran second and was fine
+---which is why one session produced a healthy screenshot and a broken one.
+---@param name string the full group name, prefix included
+---@return boolean
+local function already_set(name)
+  if vim.fn.hlexists(name) == 0 then
+    return false
+  end
+  return not vim.tbl_isempty(vim.api.nvim_get_hl(0, { name = name }))
+end
+
 function M.setup()
   for name, hl in pairs(get_hl_groups()) do
-    if vim.fn.hlexists("Octo" .. name) == 0 then
+    if not already_set("Octo" .. name) then
       vim.api.nvim_set_hl(0, "Octo" .. name, hl)
     end
   end
 
   for from, to in pairs(get_hl_links()) do
-    if vim.fn.hlexists("Octo" .. from) == 0 then
+    if not already_set("Octo" .. from) then
       vim.api.nvim_set_hl(0, "Octo" .. from, { link = to })
     end
   end
 
   vim.api.nvim_set_hl(0, "OctoButton", { link = "DiffAdd", default = true })
 end
+
+---Re-define whatever a colourscheme has just emptied.
+---
+---The guard above is what makes this work rather than no-op, and neither is enough alone:
+---re-running `setup()` under the old guard changed nothing, because every group still
+---"existed". With both, the race stops mattering -- octo losing it costs one redefinition
+---instead of every colour it draws. The same pattern `ui/loading.lua` and `ui/pr-loading.lua`
+---already use for their own strips.
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = vim.api.nvim_create_augroup("OctoColors", { clear = true }),
+  callback = function()
+    M.setup()
+  end,
+  desc = "Octo: re-define the colours a colourscheme has just cleared",
+})
 
 local HIGHLIGHT_NAME_PREFIX = "octo"
 local HIGHLIGHT_CACHE = {} ---@type table<string, string>

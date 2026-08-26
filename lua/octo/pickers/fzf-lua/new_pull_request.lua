@@ -24,7 +24,7 @@ local M = {}
 M.KIND = "octo_new_pull_request"
 
 ---What the row reads as in the list.
-M.LABEL = "＋ open a new pull request"
+M.LABEL = " open a new pull request"
 
 ---@type function|nil
 local action = nil
@@ -32,11 +32,15 @@ local action = nil
 ---Sets what the row opens, or clears it with `nil`.
 ---@param fn function|nil
 ---@return nil
-function M.set_action(fn) action = fn end
+function M.set_action(fn)
+  action = fn
+end
 
 ---Whether there is anything for the row to open.
 ---@return boolean
-function M.enabled() return type(action) == "function" end
+function M.enabled()
+  return type(action) == "function"
+end
 
 ---The row's line, in the shape every other line in these lists has.
 ---
@@ -46,7 +50,9 @@ function M.enabled() return type(action) == "function" end
 ---than empty strings because an empty field between two delimiters shifts every column
 ---after it.
 ---@return string
-function M.line() return ("%s . . %s"):format(M.KIND, M.LABEL) end
+function M.line()
+  return ("%s . . %s"):format(M.KIND, M.LABEL)
+end
 
 ---Whether a chosen line is this row rather than a pull request.
 ---@param entry string|nil the line fzf handed back
@@ -100,7 +106,9 @@ function M.run()
   if not M.enabled() then
     return
   end
-  vim.schedule(function() action() end)
+  vim.schedule(function()
+    action()
+  end)
 end
 
 return M

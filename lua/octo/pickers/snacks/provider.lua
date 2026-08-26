@@ -1551,10 +1551,10 @@ function M.users(cb)
       local ret = {} ---@type snacks.picker.Highlight[]
 
       if item.kind == "user" then
-        ret[#ret + 1] = { "👤 ", "Special" }
+        ret[#ret + 1] = { " ", "Special" }
         ret[#ret + 1] = { item.login, "Normal" }
       elseif item.kind == "team" then
-        ret[#ret + 1] = { "🏢 ", "Special" }
+        ret[#ret + 1] = { " ", "Special" }
         ret[#ret + 1] = { item.text, "Normal" }
       end
 

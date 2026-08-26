@@ -685,7 +685,34 @@ function M.dress(win)
 end
 
 ---The events after which a window is reconciled with what it is showing.
-M.FOLLOW_EVENTS = { "BufWinEnter", "BufEnter", "WinEnter", "WinNew" }
+---
+---The last four are not about following a buffer between windows at all -- they are about
+---barbecue.nvim, which draws a file breadcrumb into this same winbar and redraws it on
+---`WinResized`, `BufWinEnter`, `CursorMoved` and `InsertLeave`. Only the second of those was
+---shared, so the bar survived a split and lost to the first cursor movement: measured with
+---barbecue really loaded and its shipped config, the winbar went from this module's expression
+---to `%#barbecue_normal# %#barbecue_dirname#/%…` on `CursorMoved`, `WinResized`,
+---`InsertLeave` and `WinScrolled` alike.
+---
+---Which is why it looked like a first-startup problem and was reported as one. barbecue is
+---`VeryLazy`, so on a cold start octo dresses the window first and barbecue loads afterwards
+---and wipes it; on a later visit `BufEnter` puts it back, so the bar was there every time the
+---reader came back to a pull request and missing the first time they opened one.
+---
+---`lua/dbreader/winbar.lua` in the reader's config learnt exactly this and lists exactly these
+---events, with `WinScrolled` for a header that has to stay aligned as the view moves. A winbar
+---belongs to the window and any plugin may write it; the only defence is redrawing after
+---whoever else did.
+M.FOLLOW_EVENTS = {
+  "BufWinEnter",
+  "BufEnter",
+  "WinEnter",
+  "WinNew",
+  "CursorMoved",
+  "WinResized",
+  "WinScrolled",
+  "InsertLeave",
+}
 
 ---The augroup holding the follower, so registering it twice replaces it.
 M.FOLLOW_GROUP = "octo_keymap_help_winbar"
@@ -698,6 +725,14 @@ function M.follow()
     group = group,
     callback = function()
       M.dress(vim.api.nvim_get_current_win())
+      -- Again on the next tick, because barbecue's own updater is scheduled: on an event both
+      -- react to, its write lands after an inline one and the bar would lose a race it appears
+      -- to win. Doing only the scheduled pass is not the answer either -- it leaves the bar
+      -- absent for a tick, and every synchronous reader of it, this module's own suite
+      -- included, sees nothing. The same pair `dbreader.winbar` settled on.
+      vim.schedule(function()
+        M.dress(vim.api.nvim_get_current_win())
+      end)
     end,
     desc = "Octo: keep the keys bar on whichever window is showing an octo buffer",
   })

@@ -6,7 +6,8 @@ local keymap_help = require "octo.ui.keymap-help"
 local M = {}
 
 ---The line separating read-only context from the editable compose region.
-M.COMPOSE_MARK = "───────────────────────── your comment ─────────────────────────"
+M.COMPOSE_MARK =
+  "───────────────────────── your comment ─────────────────────────"
 
 ---What the popup's bottom border says.
 ---
@@ -211,6 +212,52 @@ function M.cancel(bufnr)
   teardown(bufnr)
 end
 
+---Turns soft wrap on for the popup's own window.
+---
+---Display-only on purpose: the buffer IS the payload -- `M.body` and `M.context_body` publish
+---its lines verbatim -- so a long quoted paragraph must break for the eye without ever gaining
+---a newline in the text. The float inherits the editor's global 'wrap', which this module
+---cannot assume is on (and in the config this fork serves, it is off), so a GitHub paragraph
+----- one buffer line however long it ran -- was clipped at the border instead of read.
+---Window-local is safe here because this float is created above and closed by teardown, never
+---handed back to hold another buffer.
+---@param winid integer the popup's floating window
+---@return nil
+local function soft_wrap(winid)
+  vim.wo[winid].wrap = true
+  vim.wo[winid].linebreak = true
+  vim.wo[winid].breakindent = true
+  -- A continuation row shifted two cells starts under the text of a `> ` quote line, so it
+  -- reads as the same quote rather than as a new unquoted line.
+  vim.wo[winid].breakindentopt = "shift:2"
+end
+
+---Grows the popup until every wrapped row is on screen, up to the screen itself.
+---
+---create_centered_float counts buffer lines when sizing, which was exact while nothing
+---wrapped; with soft wrap on, one quoted paragraph can occupy ten rows and the float would
+---show three. Measured after soft_wrap, because the row count depends on 'wrap'.
+---@param winid integer the popup's floating window
+---@return nil
+local function fit_height(winid)
+  local usable = vim.o.lines - vim.o.cmdheight - (vim.o.laststatus ~= 0 and 1 or 0)
+  -- The border spends one row above and one below whatever height is asked for.
+  local max_height = usable - 2
+  local rows = vim.api.nvim_win_text_height(winid, {}).all
+  local current = vim.api.nvim_win_get_config(winid)
+  local height = math.min(math.max(rows, current.height), max_height)
+  if height == current.height then
+    return
+  end
+  vim.api.nvim_win_set_config(winid, {
+    relative = "editor",
+    height = height,
+    width = current.width,
+    row = math.floor((usable - height) / 2),
+    col = current.col,
+  })
+end
+
 ---Options accepted by M.open.
 ---@class octo.CommentPopupOpts
 ---@field target table classification of what is being replied to, from classify_comment_target
@@ -245,6 +292,8 @@ function M.open(opts)
     footer = M.FOOTER,
     enter = true,
   }
+  soft_wrap(winid)
+  fit_height(winid)
 
   state[bufnr] = {
     winid = winid,
@@ -280,14 +329,9 @@ function M.open(opts)
   -- character sequence, and dropping the insert-mode binding would fall
   -- through to the global `<C-s>` map, `vim.lsp.buf.signature_help()`,
   -- popping LSP help instead of submitting mid-compose.
-  vim.keymap.set(
-    "n",
-    "<leader>op",
-    function()
-      M.submit(bufnr)
-    end,
-    vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" })
-  )
+  vim.keymap.set("n", "<leader>op", function()
+    M.submit(bufnr)
+  end, vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" }))
   vim.keymap.set({ "n", "i" }, "<C-s>", function()
     M.submit(bufnr)
   end, vim.tbl_extend("force", map_opts, { desc = "Octo: submit this comment" }))

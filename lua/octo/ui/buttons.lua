@@ -67,6 +67,21 @@ local VOCABULARY = {
     { label = "Reply", action = "add_reply" },
     { label = "React", action = "react_thumbs_up" },
     {
+      -- Gated exactly as `commands.edit_comment` gates itself, which is the point rather than
+      -- a coincidence: a button offered on a comment the action would refuse is worse than no
+      -- button at all, because the refusal only arrives after the press. Authorship AND the
+      -- permission, for the reason written out on Delete below.
+      --
+      -- It was missing entirely rather than gated wrongly -- only `body` offered an Edit -- so
+      -- a reader looking at a comment of their own was shown Reply, React and Delete, and the
+      -- one non-destructive thing they could do to it was the one thing nothing mentioned.
+      label = "Edit",
+      action = "edit_comment",
+      when = function(caps)
+        return caps.viewer_did_author == true and caps.viewer_can_update ~= false
+      end,
+    },
+    {
       -- Authorship AND permission, and it used to be permission alone -- which is why a
       -- Delete sat on comments the reader had not written. `viewerCanUpdate` is GitHub's
       -- answer to "may this account edit this comment", and for anyone with write access
@@ -89,6 +104,16 @@ local VOCABULARY = {
     -- octo review".
     { label = "Send", action = "save" },
     { label = "Reply", action = "add_reply" },
+    {
+      -- The same action, the same key and the same gate as the `comment` kind's Edit above.
+      -- `Send` two buttons to the left is not this: that posts what is being written now,
+      -- and this reopens something already posted.
+      label = "Edit",
+      action = "edit_comment",
+      when = function(caps)
+        return caps.viewer_did_author == true and caps.viewer_can_update ~= false
+      end,
+    },
     {
       label = "Resolve",
       action = "resolve_thread",
